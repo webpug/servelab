@@ -860,10 +860,10 @@ function openBall(rec){
    `:`<p class="muted small mb">Enter details manually.</p>
    <label class="fl">Serve speed (km/h)</label><input class="f mb" id="mSpeed" type="number" inputmode="numeric" placeholder="e.g. 165" value="${rec.speed||""}">`}
   <label class="fl">Where did it land?</label>
-  <svg class="court" viewBox="0 0 120 160"><rect x="8" y="6" width="104" height="148" rx="2" fill="none" stroke="var(--line)" stroke-width="1.5"/>
-   <line x1="8" y1="80" x2="112" y2="80" stroke="var(--court2)" stroke-width="2"/>
-   <line x1="60" y1="80" x2="60" y2="154" stroke="var(--line)"/>
-   <line x1="8" y1="117" x2="112" y2="117" stroke="var(--line)" stroke-dasharray="3 3"/></svg>
+  <svg class="court" viewBox="0 0 120 160"><rect x="8" y="6" width="104" height="148" rx="2" fill="none" style="stroke:var(--line)" stroke-width="1.5"/>
+   <line x1="8" y1="80" x2="112" y2="80" style="stroke:var(--court2)" stroke-width="2"/>
+   <line x1="60" y1="80" x2="60" y2="154" style="stroke:var(--line)"/>
+   <line x1="8" y1="117" x2="112" y2="117" style="stroke:var(--line)" stroke-dasharray="3 3"/></svg>
   <div class="zg" id="zoneGrid">
    <button data-z="Deuce Wide">Deuce · Wide</button><button data-z="Deuce Body">Deuce · Body</button><button data-z="Deuce T">Deuce · T</button>
    <button data-z="Ad T">Ad · T</button><button data-z="Ad Body">Ad · Body</button><button data-z="Ad Wide">Ad · Wide</button>
