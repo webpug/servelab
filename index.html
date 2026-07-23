@@ -1027,7 +1027,7 @@ function renderAuthSheet(){
       <input class="f mb" id="authEmail" type="email" inputmode="email" placeholder="you@email.com" autocomplete="email">
       <div id="otpWrap" class="hidden"><input class="f mb" id="authOtp" inputmode="numeric" placeholder="6-digit code"></div>
       <button class="btn primary" id="authGo">Send code</button>
-      <p class="hint">Everything works fully without an account — this only adds cross-device sync.</p>`;
+      <p class="hint">The whole app works without an account — this only adds cross-device sync. If no code arrives, sync isn't switched on for this project yet; your data stays safe on this device either way.</p>`;
     let stage="email";
     $("#authGo").onclick=async()=>{
       if(!sb){toast("Sync unavailable");return;}
