@@ -208,6 +208,12 @@ a.link{color:var(--court2);text-decoration:none;font-weight:700}
         <div class="tip"><span class="n">2</span><span>Hit 2–8 serves in one continuous take. Slow-motion (120/240fps) gives the sharpest contact + speed read.</span></div>
         <div class="tip"><span class="n">3</span><span>Everything runs <b>on your phone</b> — the video never leaves the device.</span></div>
       </div>
+      <div style="display:flex;align-items:center;gap:10px;justify-content:space-between;margin-top:14px">
+        <span class="small muted" style="flex:none">I serve with my…</span>
+        <div class="seg" id="handSeg" style="max-width:230px;flex:1">
+          <button data-h="auto">Auto</button><button data-h="right">Right</button><button data-h="left">Left</button>
+        </div>
+      </div>
       <input type="file" id="fileRec" accept="video/*" capture="environment" class="hidden">
       <input type="file" id="filePick" accept="video/*" class="hidden">
     </div>
@@ -397,7 +403,7 @@ const PHASES=[
 /* ================= STATE / STORE ================= */
 const store={
   get k(){return "servelab_v2";},
-  load(){ try{return JSON.parse(localStorage.getItem(this.k))||{serves:[],profile:"textbook",hand:"right"};}catch(e){return {serves:[],profile:"textbook",hand:"right"};} },
+  load(){ try{return JSON.parse(localStorage.getItem(this.k))||{serves:[],profile:"textbook",hand:"auto"};}catch(e){return {serves:[],profile:"textbook",hand:"auto"};} },
   save(s){ localStorage.setItem(this.k, JSON.stringify(s)); }
 };
 let S = store.load();
@@ -536,6 +542,16 @@ function smooth(arr,win=2){
 function elbowFlex(fr,I){ // world-landmark elbow flexion
   const w=fr.w; if(!w) return null;
   const a=angle3(w[I.sh],w[I.el],w[I.wr]); return isNaN(a)?null:180-a;
+}
+// auto-detect racket hand: the wrist that reaches the highest point in the clip (contact reach)
+function detectHand(frames){
+  let best=1e9, side="right";
+  for(const f of frames){ if(!f.p) continue;
+    const L=f.p[LM.Lwr], R=f.p[LM.Rwr];
+    if(L&&L.y<best){best=L.y; side="left";}
+    if(R&&R.y<best){best=R.y; side="right";}
+  }
+  return side;
 }
 function detectServes(frames,hand){
   const I=idxFor(hand);
@@ -699,8 +715,6 @@ function renderKeyframe(canvas, frame, hand, phase, bands){
   ctx.restore();
   // user skeleton
   drawSkeleton(ctx,p,W,H,"rgba(216,232,56,.95)","rgba(243,246,244,.9)",3);
-  // highlight the measured joints
-  ctx.fillStyle="var(--pop)";
 }
 
 /* ================= VIEW: RESULTS ================= */
@@ -708,8 +722,8 @@ let lastFrames=null, lastResult=null; // keep frames of current analysis in memo
 function ringSVG(score,size=76){
   const r=(size-10)/2, c=2*Math.PI*r, col = score>=80?"var(--good)":score>=60?"var(--warn)":"var(--bad)";
   const off=c*(1-(score||0)/100);
-  return `<svg width="${size}" height="${size}"><circle cx="${size/2}" cy="${size/2}" r="${r}" stroke="var(--line)" stroke-width="7" fill="none"/>
-    <circle cx="${size/2}" cy="${size/2}" r="${r}" stroke="${col}" stroke-width="7" fill="none" stroke-linecap="round"
+  return `<svg width="${size}" height="${size}"><circle cx="${size/2}" cy="${size/2}" r="${r}" style="stroke:var(--line)" stroke-width="7" fill="none"/>
+    <circle cx="${size/2}" cy="${size/2}" r="${r}" style="stroke:${col}" stroke-width="7" fill="none" stroke-linecap="round"
     stroke-dasharray="${c}" stroke-dashoffset="${off}"/></svg><div class="val">${score??"–"}<small>SCORE</small></div>`;
 }
 function badgeFor(score){ const c=score>=80?"g":score>=60?"w":"b"; const t=score>=80?"Strong":score>=60?"Solid":"Work on it"; return `<span class="badge ${c}">${t}</span>`; }
@@ -778,7 +792,7 @@ function openDetail(rec){
   // keyframe canvas (only if frames in memory)
   if(detFrames && rec.keys){
     html+=`<div class="seg mb" id="phaseSeg"><button class="on" data-p="trophy">Trophy</button><button data-p="contact">Contact</button></div>
-      <canvas id="kfCanvas" style="width:100%;border-radius:12px;background:#0a1119;aspect-ratio:${lastResult?lastResult.frames&&1:1}"></canvas>
+      <canvas id="kfCanvas" style="width:100%;height:auto;border-radius:12px;background:#0a1119"></canvas>
       <div class="legend mb"><b><i style="background:var(--pop)"></i>You</b><b><i style="background:var(--court2)"></i>Ideal ${prof.name}</b></div>`;
   }
   // metrics
@@ -786,9 +800,9 @@ function openDetail(rec){
   for(const M of METRICS){
     const v=rec.metrics[M.key]; if(v==null) continue;
     const b=prof.bands[M.key], sc=rec.mscores?rec.mscores[M.key]:scoreMetric(M.key,v,prof.bands);
-    // bar range
-    const min = M.key==="contactHeight"?0: (M.key==="trunkTilt"?0:0);
-    const max = M.key==="contactHeight"?1.4: 180;
+    // bar range (per-metric so the target band is readable)
+    const RANGE={kneeBend:[0,120],elbowTrophy:[0,180],shoulderTrophy:[0,180],trunkTilt:[0,90],elbowContact:[0,120],shoulderContact:[60,180],contactHeight:[0,1.4]};
+    const [min,max]=RANGE[M.key]||[0,180];
     const bl=clamp((b[0]-min)/(max-min),0,1)*100, bw=clamp((Math.min(b[1],max)-b[0])/(max-min),0,1)*100;
     const cur=clamp((v-min)/(max-min),0,1)*100;
     const col=sc>=80?"var(--good)":sc>=55?"var(--warn)":"var(--bad)";
@@ -809,7 +823,9 @@ function openDetail(rec){
   }
   // ball
   html+=`<button class="btn pop" id="ballBtn" style="margin-top:16px">🎾 ${rec.speed?("Speed "+rec.speed+" km/h · "+ (rec.placement||"—")):"Add ball speed & placement"}</button>`;
+  html+=`<button class="btn ghost sm" id="delBtn" style="margin:10px auto 0;color:var(--bad)">Delete this serve</button>`;
   body.innerHTML=html;
+  $("#delBtn").onclick=()=>{ if(confirm("Delete this serve? This can't be undone.")){ deleteServe(rec.id); closeModal("#detailModal"); toast("Serve deleted"); } };
 
   if(detFrames && rec.keys){
     const cv=$("#kfCanvas");
@@ -836,7 +852,7 @@ function openBall(rec){
   const hasFrames = lastFrames && rec.keys;
   body.innerHTML=`
   ${hasFrames?`<p class="muted small mb">Tap the ball at contact, then scrub to where it lands and tap again. Set a real-world distance once for scale.</p>
-   <div class="overlaywrap"><canvas id="ballCv" style="width:100%;border-radius:12px;background:#0a1119"></canvas></div>
+   <div class="overlaywrap"><canvas id="ballCv" style="width:100%;height:auto;border-radius:12px;background:#0a1119"></canvas></div>
    <input type="range" id="ballScrub" min="0" max="100" value="0" style="width:100%;margin:12px 0">
    <div class="seg mb" id="ballStep"><button class="on" data-s="contact">1 · Contact</button><button data-s="land">2 · Landing</button><button data-s="scale">3 · Scale</button></div>
    <p class="hint" id="ballHint">Tap the ball at the contact frame.</p>
@@ -944,14 +960,14 @@ function lineChart(series, {w=520,h=150,pad=24,fmt=v=>Math.round(v)}={}){
   const X=i=>pad+(n<=1?0:(i/(n-1))*(w-pad*2));
   const Y=v=>h-pad-((v-lo)/(hi-lo))*(h-pad*2);
   let g="";
-  for(let k=0;k<=3;k++){const yy=pad+k/3*(h-pad*2);g+=`<line x1="${pad}" y1="${yy}" x2="${w-pad}" y2="${yy}" stroke="var(--line)" stroke-width="1"/>`;}
-  g+=`<text x="${pad}" y="${Y(hi)-4}" fill="var(--ink3)" font-size="10">${fmt(hi)}</text><text x="${pad}" y="${h-pad+12}" fill="var(--ink3)" font-size="10">${fmt(lo)}</text>`;
+  for(let k=0;k<=3;k++){const yy=pad+k/3*(h-pad*2);g+=`<line x1="${pad}" y1="${yy}" x2="${w-pad}" y2="${yy}" style="stroke:var(--line)" stroke-width="1"/>`;}
+  g+=`<text x="${pad}" y="${Y(hi)-4}" style="fill:var(--ink3)" font-size="10">${fmt(hi)}</text><text x="${pad}" y="${h-pad+12}" style="fill:var(--ink3)" font-size="10">${fmt(lo)}</text>`;
   for(const s of series){
     if(!s.data.length) continue;
     let d=s.data.map((p,i)=>`${i?"L":"M"}${X(i).toFixed(1)},${Y(p.y).toFixed(1)}`).join(" ");
-    g+=`<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+    g+=`<path d="${d}" fill="none" style="stroke:${s.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`;
     const last=s.data[s.data.length-1];
-    g+=`<circle cx="${X(s.data.length-1)}" cy="${Y(last.y)}" r="4" fill="${s.color}"/>`;
+    g+=`<circle cx="${X(s.data.length-1)}" cy="${Y(last.y)}" r="4" style="fill:${s.color}"/>`;
   }
   return `<svg class="chart" viewBox="0 0 ${w} ${h}">${g}</svg>`;
 }
@@ -1088,13 +1104,15 @@ async function runAnalysis(file){
   $("#resultCard").classList.add("hidden");
   $("#procCard").classList.remove("hidden");
   $("#procStage").textContent="Loading AI model…";
-  $("#procFill").style.width="4%"; $("#procPct").textContent="Preparing on-device model…";
+  $("#procFill").style.width="4%"; $("#procPct").textContent="First run downloads a ~30MB model — a few seconds…";
   try{
     await getLandmarker();
     const result=await processVideo(file);
     if(!result){ $("#procCard").classList.add("hidden"); $("#captureCard").classList.remove("hidden"); return; }
     $("#procStage").textContent="Grading serves…";
-    const analysis=analyzeSession(result,S.hand,S.profile);
+    const hand = S.hand==="auto" ? detectHand(result.frames) : S.hand;
+    if(S.hand==="auto") toast("Detected: "+(hand==="left"?"left":"right")+"-handed");
+    const analysis=analyzeSession(result,hand,S.profile);
     await showResults(analysis,result);
   }catch(err){
     console.error(err);
@@ -1103,8 +1121,18 @@ async function runAnalysis(file){
   }
 }
 
+function deleteServe(id){
+  const i=S.serves.findIndex(s=>s.id===id); if(i>=0)S.serves.splice(i,1);
+  persist(); renderServes(); renderProgress(); renderReco();
+  if(sb&&user){ try{ sb.from("serves").delete().eq("id",id); sb.storage.from("thumbs").remove([user.id+"/"+id+".jpg"]); }catch(e){} }
+}
+function renderHand(){
+  $$("#handSeg button").forEach(b=>{ b.classList.toggle("on", b.dataset.h===S.hand);
+    b.onclick=()=>{ S.hand=b.dataset.h; persist(); renderHand(); }; });
+}
+
 /* ================= BOOT ================= */
-renderServes(); renderProgress(); renderCoach();
+renderServes(); renderProgress(); renderCoach(); renderHand();
 initSB();
 // warm the model in the background so first analysis is fast
 setTimeout(()=>getLandmarker().catch(()=>{}),1500);
