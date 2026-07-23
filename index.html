@@ -1,0 +1,1113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ServeLab">
+<meta name="theme-color" content="#0e1621">
+<title>ServeLab — Serve Analyzer</title>
+<style>
+:root{
+  --bg:#0e1621; --panel:#16202d; --panel2:#1c2836; --line:#26364a;
+  --ink:#f3f6f4; --ink2:#9fb0be; --ink3:#6b7d8d;
+  --court:#2f6fb0; --court2:#3b82c4; --pop:#d8e838; --pop2:#c3d129;
+  --good:#2fbf71; --warn:#f5b027; --bad:#e5533c;
+  --shadow:0 8px 30px rgba(0,0,0,.35);
+  --r:16px; --font:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text",system-ui,"Segoe UI",Roboto,sans-serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#eef1ee; --panel:#ffffff; --panel2:#f6f8f5; --line:#e0e5df;
+    --ink:#13202b; --ink2:#546475; --ink3:#8b99a6;
+    --shadow:0 8px 24px rgba(20,40,60,.10);
+  }
+}
+:root[data-theme="light"]{
+  --bg:#eef1ee; --panel:#ffffff; --panel2:#f6f8f5; --line:#e0e5df;
+  --ink:#13202b; --ink2:#546475; --ink3:#8b99a6; --shadow:0 8px 24px rgba(20,40,60,.10);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{
+  font-family:var(--font); background:var(--bg); color:var(--ink);
+  -webkit-font-smoothing:antialiased; overscroll-behavior-y:none;
+  padding-bottom:calc(76px + env(safe-area-inset-bottom));
+}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+h1,h2,h3,h4{margin:0;font-weight:700;letter-spacing:-.02em}
+.wrap{max-width:560px;margin:0 auto;padding:0 16px}
+/* header */
+header{position:sticky;top:0;z-index:30;background:color-mix(in srgb,var(--bg) 86%,transparent);
+  backdrop-filter:saturate(1.4) blur(14px);border-bottom:1px solid var(--line);
+  padding-top:env(safe-area-inset-top)}
+.hd{display:flex;align-items:center;gap:10px;height:56px}
+.logo{display:flex;align-items:center;gap:9px;font-weight:800;letter-spacing:-.03em;font-size:19px}
+.logo .dot{width:22px;height:22px;border-radius:7px;background:linear-gradient(135deg,var(--court2),var(--court));
+  display:grid;place-items:center;box-shadow:0 2px 8px rgba(47,111,176,.5)}
+.logo .dot::after{content:"";width:10px;height:10px;border-radius:50%;background:var(--pop);box-shadow:0 0 0 2px rgba(216,232,56,.25)}
+.logo b{color:var(--pop)}
+.hd .sp{flex:1}
+.iconbtn{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;background:var(--panel);border:1px solid var(--line);font-size:16px}
+.chip{font-size:12px;padding:6px 11px;border-radius:20px;background:var(--panel);border:1px solid var(--line);color:var(--ink2);font-weight:600;display:flex;align-items:center;gap:6px}
+.chip.on{color:var(--good);border-color:color-mix(in srgb,var(--good) 40%,var(--line))}
+.chip .d{width:7px;height:7px;border-radius:50%;background:currentColor}
+/* views */
+main{padding-top:16px}
+.view{display:none;animation:fade .3s ease}
+.view.active{display:block}
+@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px;box-shadow:var(--shadow)}
+.card+.card{margin-top:14px}
+.mb{margin-bottom:14px}
+.eyebrow{font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--ink3)}
+.muted{color:var(--ink2)}
+.small{font-size:13px}
+.tiny{font-size:11.5px}
+.center{text-align:center}
+.tnum{font-variant-numeric:tabular-nums}
+/* buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font-weight:700;font-size:15px;
+  padding:14px 18px;border-radius:13px;background:var(--panel2);border:1px solid var(--line);color:var(--ink);width:100%;transition:transform .1s}
+.btn:active{transform:scale(.98)}
+.btn.primary{background:linear-gradient(135deg,var(--court2),var(--court));color:#fff;border-color:transparent;box-shadow:0 6px 18px rgba(47,111,176,.4)}
+.btn.pop{background:var(--pop);color:#14200a;border-color:transparent;box-shadow:0 6px 18px rgba(216,232,56,.35)}
+.btn.ghost{background:transparent}
+.btn.sm{padding:10px 14px;font-size:13.5px;width:auto}
+.row{display:flex;gap:10px}
+.row.wrap{flex-wrap:wrap}
+/* capture zone */
+.drop{border:1.5px dashed var(--line);border-radius:var(--r);padding:26px 18px;text-align:center;background:
+  radial-gradient(120% 80% at 50% -10%,color-mix(in srgb,var(--court) 12%,transparent),transparent 60%)}
+.drop .big{font-size:44px;margin-bottom:6px}
+.tips{display:grid;gap:9px;margin-top:14px}
+.tip{display:flex;gap:10px;align-items:flex-start;font-size:13px;color:var(--ink2)}
+.tip .n{flex:none;width:22px;height:22px;border-radius:7px;background:var(--panel2);border:1px solid var(--line);display:grid;place-items:center;font-weight:800;font-size:11px;color:var(--court2)}
+/* progress bar */
+.pbar{height:8px;border-radius:6px;background:var(--panel2);overflow:hidden;border:1px solid var(--line)}
+.pbar>i{display:block;height:100%;background:linear-gradient(90deg,var(--court2),var(--pop));width:0;transition:width .2s}
+.stagevid{width:100%;border-radius:12px;background:#000;display:block;aspect-ratio:9/16;object-fit:contain;max-height:44vh}
+.overlaywrap{position:relative}
+.overlaywrap canvas.ov{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+/* score ring */
+.ring{position:relative;width:76px;height:76px;flex:none}
+.ring svg{transform:rotate(-90deg)}
+.ring .val{position:absolute;inset:0;display:grid;place-content:center;text-align:center;font-weight:800;font-size:22px;line-height:1}
+.ring .val small{font-size:10px;font-weight:700;color:var(--ink3);display:block;letter-spacing:.1em}
+/* serve list */
+.slist{display:grid;gap:10px}
+.sitem{display:flex;gap:13px;align-items:center;padding:12px;border:1px solid var(--line);border-radius:14px;background:var(--panel2)}
+.sitem .th{width:52px;height:52px;border-radius:10px;object-fit:cover;background:var(--panel);flex:none;border:1px solid var(--line)}
+.sitem .meta{flex:1;min-width:0}
+.sitem .meta h4{font-size:15px}
+.badge{font-size:11px;font-weight:700;padding:3px 8px;border-radius:20px;display:inline-flex;gap:5px;align-items:center}
+.badge.g{background:color-mix(in srgb,var(--good) 16%,transparent);color:var(--good)}
+.badge.w{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
+.badge.b{background:color-mix(in srgb,var(--bad) 16%,transparent);color:var(--bad)}
+/* metric rows */
+.metric{padding:11px 0;border-top:1px solid var(--line)}
+.metric:first-child{border-top:none}
+.metric .top{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.metric .name{font-weight:700;font-size:14px}
+.metric .vals{font-size:13px;color:var(--ink2)}
+.metric .vals b{color:var(--ink);font-size:15px}
+.mbar{height:7px;border-radius:5px;margin-top:8px;background:var(--panel2);position:relative;overflow:hidden;border:1px solid var(--line)}
+.mbar .band{position:absolute;top:0;bottom:0;background:color-mix(in srgb,var(--good) 30%,transparent)}
+.mbar .cur{position:absolute;top:-2px;bottom:-2px;width:3px;border-radius:3px;background:var(--ink)}
+.metric .fx{font-size:12px;margin-top:6px;color:var(--ink2)}
+/* seg tabs */
+.seg{display:flex;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:4px;gap:4px}
+.seg button{flex:1;padding:9px 6px;border-radius:9px;font-weight:700;font-size:13px;color:var(--ink2)}
+.seg button.on{background:var(--panel);color:var(--ink);box-shadow:0 2px 6px rgba(0,0,0,.15)}
+/* stat tiles */
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.tile{background:var(--panel2);border:1px solid var(--line);border-radius:13px;padding:13px}
+.tile .k{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);font-weight:800}
+.tile .v{font-size:26px;font-weight:800;margin-top:4px;letter-spacing:-.02em}
+.tile .v small{font-size:13px;color:var(--ink2);font-weight:700}
+/* drills */
+.drill{border:1px solid var(--line);border-radius:14px;padding:14px;background:var(--panel2)}
+.drill+.drill{margin-top:10px}
+.drill h4{font-size:15px;display:flex;justify-content:space-between;gap:8px;align-items:center}
+.drill .rx{font-size:11px;font-weight:800;color:var(--pop2);background:color-mix(in srgb,var(--pop) 16%,transparent);padding:3px 8px;border-radius:8px;white-space:nowrap}
+.drill p{margin:8px 0 0;font-size:13px;color:var(--ink2);line-height:1.5}
+.drill .why{color:var(--court2);font-weight:600}
+/* phases coach */
+.phase{display:flex;gap:12px;padding:12px 0;border-top:1px solid var(--line)}
+.phase:first-child{border-top:none}
+.phase .num{flex:none;width:30px;height:30px;border-radius:9px;background:var(--panel2);border:1px solid var(--line);display:grid;place-items:center;font-weight:800;color:var(--court2)}
+.phase h4{font-size:14.5px}
+.phase p{margin:4px 0 0;font-size:12.5px;color:var(--ink2);line-height:1.5}
+/* nav */
+nav{position:fixed;left:0;right:0;bottom:0;z-index:40;background:color-mix(in srgb,var(--bg) 88%,transparent);
+  backdrop-filter:saturate(1.4) blur(16px);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+.nav{max-width:560px;margin:0 auto;display:flex;height:72px}
+.nav button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--ink3);font-size:10.5px;font-weight:700}
+.nav button svg{width:23px;height:23px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.nav button.on{color:var(--pop)}
+/* modal */
+.modal{position:fixed;inset:0;z-index:60;display:none}
+.modal.open{display:block}
+.modal .scrim{position:absolute;inset:0;background:rgba(4,8,12,.6);backdrop-filter:blur(3px)}
+.sheet{position:absolute;left:0;right:0;bottom:0;max-height:94vh;overflow:auto;background:var(--bg);
+  border-radius:22px 22px 0 0;border-top:1px solid var(--line);padding:8px 0 calc(24px + env(safe-area-inset-bottom));
+  animation:up .32s cubic-bezier(.2,.8,.2,1)}
+@keyframes up{from{transform:translateY(100%)}to{transform:none}}
+.grab{width:38px;height:4px;border-radius:3px;background:var(--line);margin:8px auto 6px}
+.mhd{display:flex;align-items:center;gap:10px;padding:6px 16px 12px}
+.mhd h3{flex:1;font-size:18px}
+.x{width:32px;height:32px;border-radius:9px;background:var(--panel);border:1px solid var(--line);display:grid;place-items:center;font-size:15px}
+input.f{width:100%;padding:14px;border-radius:12px;background:var(--panel2);border:1px solid var(--line);color:var(--ink);font-size:16px;font-family:inherit}
+input.f:focus{outline:none;border-color:var(--court2)}
+label.fl{display:block;font-size:12px;font-weight:700;color:var(--ink2);margin:0 0 7px}
+.hint{font-size:12px;color:var(--ink3);margin-top:8px;line-height:1.5}
+.hidden{display:none!important}
+.court{width:100%;max-width:220px;margin:0 auto;display:block}
+.zg{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px}
+.zg button{padding:10px 4px;border-radius:9px;background:var(--panel2);border:1px solid var(--line);font-weight:700;font-size:12px;color:var(--ink2)}
+.zg button.on{background:var(--court);border-color:transparent;color:#fff}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(88px + env(safe-area-inset-bottom));z-index:80;
+  background:var(--ink);color:var(--bg);font-weight:700;font-size:13.5px;padding:11px 18px;border-radius:24px;box-shadow:var(--shadow);opacity:0;transition:opacity .25s,transform .25s;pointer-events:none}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(-4px)}
+.spin{width:18px;height:18px;border-radius:50%;border:2.5px solid rgba(255,255,255,.3);border-top-color:#fff;animation:sp 1s linear infinite;display:inline-block}
+@keyframes sp{to{transform:rotate(360deg)}}
+.empty{text-align:center;padding:40px 20px;color:var(--ink3)}
+.empty .big{font-size:40px;margin-bottom:10px}
+svg.chart{width:100%;height:auto;display:block;overflow:visible}
+.legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:12px;color:var(--ink2)}
+.legend b{display:inline-flex;align-items:center;gap:6px;font-weight:600}
+.legend i{width:11px;height:3px;border-radius:2px;display:inline-block}
+a.link{color:var(--court2);text-decoration:none;font-weight:700}
+</style>
+</head>
+<body>
+<header><div class="wrap hd">
+  <div class="logo"><span class="dot"></span>Serve<b>Lab</b></div>
+  <div class="sp"></div>
+  <button class="chip" id="authChip"><span class="d"></span><span id="authTxt">Local</span></button>
+  <button class="iconbtn" id="themeBtn">◐</button>
+</div></header>
+
+<main class="wrap">
+  <!-- ANALYZE -->
+  <section class="view active" id="v-analyze">
+    <div id="captureCard" class="card">
+      <div class="eyebrow mb">Analyze</div>
+      <div class="drop">
+        <div class="big">🎾</div>
+        <h2>Film a few serves</h2>
+        <p class="muted small" style="margin:6px 0 0">Record continuously — the app finds every serve in the clip, tracks your whole body with on-device AI, and grades each one against pro form.</p>
+        <div class="row" style="margin-top:16px">
+          <button class="btn primary" id="recBtn">🎥 Record</button>
+          <button class="btn" id="pickBtn">📁 Upload clip</button>
+        </div>
+      </div>
+      <div class="tips">
+        <div class="tip"><span class="n">1</span><span>Film from the <b>side</b> (your baseline), phone held vertical or horizontal, ~4–6m away so your whole body + toss stay in frame.</span></div>
+        <div class="tip"><span class="n">2</span><span>Hit 2–8 serves in one continuous take. Slow-motion (120/240fps) gives the sharpest contact + speed read.</span></div>
+        <div class="tip"><span class="n">3</span><span>Everything runs <b>on your phone</b> — the video never leaves the device.</span></div>
+      </div>
+      <input type="file" id="fileRec" accept="video/*" capture="environment" class="hidden">
+      <input type="file" id="filePick" accept="video/*" class="hidden">
+    </div>
+
+    <div id="procCard" class="card hidden">
+      <div class="eyebrow mb" id="procStage">Loading AI model…</div>
+      <div class="overlaywrap">
+        <video id="stageVid" class="stagevid" playsinline muted></video>
+        <canvas class="ov" id="stageOv"></canvas>
+      </div>
+      <div class="pbar" style="margin-top:14px"><i id="procFill"></i></div>
+      <p class="muted small tnum" id="procPct" style="margin:10px 0 0">0%</p>
+      <button class="btn ghost sm" id="cancelBtn" style="margin-top:10px">Cancel</button>
+    </div>
+
+    <div id="resultCard" class="card hidden">
+      <div style="display:flex;align-items:center;gap:14px">
+        <div class="ring" id="sessRing"></div>
+        <div style="flex:1">
+          <div class="eyebrow">Session result</div>
+          <h2 id="sessTitle">— serves</h2>
+          <p class="muted small" id="sessSub">—</p>
+        </div>
+      </div>
+      <div class="slist" id="sessServes" style="margin-top:16px"></div>
+      <button class="btn" id="againBtn" style="margin-top:14px">Analyze another clip</button>
+    </div>
+  </section>
+
+  <!-- SERVES -->
+  <section class="view" id="v-serves">
+    <div class="eyebrow mb">Serve log</div>
+    <div id="servesList"></div>
+  </section>
+
+  <!-- PROGRESS -->
+  <section class="view" id="v-progress">
+    <div class="eyebrow mb">Progress</div>
+    <div id="progressBody"></div>
+  </section>
+
+  <!-- COACH -->
+  <section class="view" id="v-coach">
+    <div class="eyebrow mb">Coach</div>
+    <div class="card mb">
+      <label class="fl">Compare against</label>
+      <div class="seg" id="profileSeg"></div>
+      <p class="hint" id="profileDesc"></p>
+    </div>
+    <div class="card mb">
+      <h3 class="mb">Recommended for you</h3>
+      <div id="recoDrills"><p class="muted small">Analyze a serve and your top fixes show up here.</p></div>
+    </div>
+    <div class="card mb">
+      <h3 class="mb">The serve, in 8 phases</h3>
+      <div id="phaseList"></div>
+    </div>
+    <div class="card">
+      <h3 class="mb">Drill library</h3>
+      <div id="drillLib"></div>
+    </div>
+  </section>
+</main>
+
+<nav><div class="nav">
+  <button class="on" data-view="analyze"><svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18"/></svg>Analyze</button>
+  <button data-view="serves"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Serves</button>
+  <button data-view="progress"><svg viewBox="0 0 24 24"><path d="M4 19V5m0 14h16M8 15l3-4 3 2 4-6"/></svg>Progress</button>
+  <button data-view="coach"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>Coach</button>
+</div></nav>
+
+<!-- serve detail modal -->
+<div class="modal" id="detailModal">
+  <div class="scrim" data-close></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <div class="mhd"><h3 id="dTitle">Serve</h3><button class="x" data-close>✕</button></div>
+    <div class="wrap" id="dBody"></div>
+  </div>
+</div>
+
+<!-- ball tool modal -->
+<div class="modal" id="ballModal">
+  <div class="scrim" data-close></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <div class="mhd"><h3>Ball speed &amp; placement</h3><button class="x" data-close>✕</button></div>
+    <div class="wrap" id="ballBody"></div>
+  </div>
+</div>
+
+<!-- auth modal -->
+<div class="modal" id="authModal">
+  <div class="scrim" data-close></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <div class="mhd"><h3>Sync across devices</h3><button class="x" data-close>✕</button></div>
+    <div class="wrap" id="authBody"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module">
+import { FilesetResolver, PoseLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.15";
+
+const SUPABASE_URL = "https://vdwjjdbveykfjfnevsjh.supabase.co";
+const SUPABASE_ANON = "sb_publishable_fVmmlJMPIVBaY-UHhyG_Uw_ODjykBoF";
+const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task";
+const WASM_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.15/wasm";
+
+/* ---------- tiny helpers ---------- */
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const el = (t,c,h)=>{const e=document.createElement(t); if(c)e.className=c; if(h!=null)e.innerHTML=h; return e;};
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const uid=()=>crypto.randomUUID();
+function toast(msg){const t=$("#toast");t.textContent=msg;t.classList.add("show");clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove("show"),2200);}
+function once(node,ev){return new Promise(r=>node.addEventListener(ev,r,{once:true}));}
+
+/* ================= LANDMARK MODEL ================= */
+// MediaPipe 33-landmark indices
+const LM={nose:0,Lsh:11,Rsh:12,Lel:13,Rel:14,Lwr:15,Rwr:16,Lhip:23,Rhip:24,Lkn:25,Rkn:26,Lank:27,Rank:28};
+
+// 3D angle at vertex b (points a,b,c are {x,y,z})
+function angle3(a,b,c){
+  const abx=a.x-b.x,aby=a.y-b.y,abz=a.z-b.z, cbx=c.x-b.x,cby=c.y-b.y,cbz=c.z-b.z;
+  const dot=abx*cbx+aby*cby+abz*cbz;
+  const m=Math.hypot(abx,aby,abz)*Math.hypot(cbx,cby,cbz);
+  if(!m) return NaN;
+  return Math.acos(clamp(dot/m,-1,1))*180/Math.PI;
+}
+// 2D angle from vertical of vector (from->to), image coords (y down). 0 = straight up.
+function tiltFromVertical(from,to){
+  const dx=to.x-from.x, dy=to.y-from.y; // to above from => dy<0
+  return Math.atan2(Math.abs(dx), -dy)*180/Math.PI;
+}
+const mid=(p,q)=>({x:(p.x+q.x)/2,y:(p.y+q.y)/2,z:((p.z||0)+(q.z||0))/2});
+
+/* ================= PRO PROFILES ================= */
+// bands are [lo,hi] in the metric's own unit (flexion° for knee/elbow, ° for tilt/shoulder, ratio for height)
+const PROFILES = {
+  textbook:{name:"Textbook (ITF)", desc:"Balanced, biomechanically efficient form drawn from published pro serve data — the reference every style is measured against.",
+    bands:{kneeBend:[52,78], elbowTrophy:[78,112], shoulderTrophy:[65,115], trunkTilt:[28,50], elbowContact:[8,38], shoulderContact:[148,180], contactHeight:[0.40,2]}},
+  bigserver:{name:"Big Server", desc:"Maximum leverage & extension — deep leg load, big shoulder-over-shoulder tilt, hitting at full stretch. Think first-serve bombs.",
+    bands:{kneeBend:[60,86], elbowTrophy:[80,110], shoulderTrophy:[70,115], trunkTilt:[34,56], elbowContact:[4,26], shoulderContact:[155,180], contactHeight:[0.5,2]}},
+  allcourt:{name:"All-Court", desc:"Compact, repeatable, efficient — moderate knee bend and tilt, prioritising rhythm and placement over raw pace.",
+    bands:{kneeBend:[44,66], elbowTrophy:[80,112], shoulderTrophy:[65,110], trunkTilt:[26,46], elbowContact:[10,40], shoulderContact:[145,180], contactHeight:[0.38,2]}},
+  kick:{name:"Kick / Spin", desc:"Second-serve spin build — extra knee load and lateral tilt to brush up the back of the ball, contact slightly less extended.",
+    bands:{kneeBend:[58,84], elbowTrophy:[78,110], shoulderTrophy:[65,110], trunkTilt:[36,58], elbowContact:[14,42], shoulderContact:[140,175], contactHeight:[0.36,2]}}
+};
+const METRICS=[
+  {key:"kneeBend",   phase:"trophy",  label:"Leg drive (knee bend)", unit:"°", w:.15, higher:1, note:"Deep front-knee load = explosive push up into the ball."},
+  {key:"elbowTrophy",phase:"trophy",  label:"Racket drop (elbow)",   unit:"°", w:.12, higher:0, note:"~90° bend in the trophy sets up the racket-head drop."},
+  {key:"shoulderTrophy",phase:"trophy",label:"Trophy arm angle",     unit:"°", w:.10, higher:0, note:"Hitting arm up beside the head, not flared out."},
+  {key:"trunkTilt",  phase:"contact", label:"Body tilt at contact",  unit:"°", w:.15, higher:1, note:"Shoulder-over-shoulder cartwheel tilt into the court."},
+  {key:"elbowContact",phase:"contact",label:"Arm extension @ contact",unit:"°",w:.20, higher:0, note:"Straight arm at contact = highest, fastest strike."},
+  {key:"shoulderContact",phase:"contact",label:"Reach @ contact",    unit:"°", w:.13, higher:1, note:"Fully stacked & reaching up through the ball."},
+  {key:"contactHeight",phase:"contact",label:"Contact height",       unit:"", w:.15, higher:1, note:"How far above your head you strike, vs torso length."}
+];
+function metricDisplay(key,v){ if(key==="contactHeight") return v.toFixed(2)+"×"; return Math.round(v)+"°"; }
+
+/* ================= DRILLS ================= */
+const DRILLS={
+  legDrive:{n:"Down-Together-Up",rx:"3×6",why:"Builds explosive leg drive & upward push.",how:"Exaggerate the knee bend, bring back foot up to front, then drive straight up so both feet leave the ground. Land inside the court."},
+  pauseTrophy:{n:"Pause-at-Trophy",rx:"3×5",why:"Grooves a loaded, balanced trophy position.",how:"Serve in slow motion, freeze 2 full seconds in the trophy (knees bent, racket up, toss arm high), then finish the motion."},
+  backScratch:{n:"Back-Scratch Drop",rx:"20 reps",why:"Frees the racket-head drop for real racket speed.",how:"From the trophy, let the racket fall down your back (scratch between the shoulder blades) before swinging up. No arm — just gravity + shoulder."},
+  reachDrill:{n:"Reach & Tip-Toe",rx:"3×8",why:"Trains a straight arm and the highest possible contact.",how:"Serve rising onto your toes, arm bolt-straight at contact, trying to hit the ball at the very top of your reach. Feel tall."},
+  tossHigher:{n:"Toss a Touch Higher",rx:"15 serves",why:"A slightly higher toss lets the arm fully extend before contact.",how:"Place the toss so the ball starts to drop just as you reach it — you should strike a straight, fully-stretched arm, not a bent one."},
+  cartwheelDrill:{n:"Shoulder-over-Shoulder",rx:"15 reps",why:"Adds the trunk tilt that stacks power up into the ball.",how:"Shadow-serve feeling the back shoulder rotate up and over the front — like a slow cartwheel. Chin up, chest to the sky at contact."},
+  tiltDrill:{n:"Wall Lean Serve",rx:"3×6",why:"Ingrains lateral tilt without over-arching.",how:"Start with your hitting-side hip pressed toward the net; keep that lean as you drive up so you tilt into the court, not straight up."},
+  trophyPos:{n:"Mirror Trophy Holds",rx:"2 min",why:"Cleans up trophy arm & shoulder alignment.",how:"In a mirror, match the trophy: hitting elbow ~shoulder height & bent ~90°, racket up, toss arm straight and tall. Hold, reset, repeat."},
+  tossConsistency:{n:"Toss into a Hoop",rx:"30 tosses",why:"A repeatable toss is the foundation of a repeatable serve.",how:"Lay a racket/hoop ~30cm inside the baseline. Toss (no hit) and land the ball in it 8/10 before you serve for real."},
+  pronation:{n:"Fence Pronation Snaps",rx:"20 snaps",why:"Adds racket-head speed & natural finish through pronation.",how:"Edge-first, snap the strings to face the fence at contact height, letting the forearm pronate. Feel the 'karate chop → hand-shake' turn."}
+};
+const PHASES=[
+  ["Start / stance","Sideways to the net, weight loaded on the back foot, relaxed. Feet ~shoulder width."],
+  ["Release / toss","Both arms move down-together-up. Toss arm sends the ball up & slightly into the court; eyes up."],
+  ["Loading","Knees bend (front-knee flexion ~55–75°), hips coil, weight sinks — the spring compresses."],
+  ["Trophy","Hitting elbow ~shoulder height & bent ~90°, racket up, toss arm straight. Peak coil."],
+  ["Racket drop","Racket falls down the back from shoulder external rotation (>140°) — the biggest source of racket speed."],
+  ["Acceleration → contact","Legs drive up, trunk tilts & uncoils, arm whips to a straight-arm strike ~110° shoulder elevation."],
+  ["Contact","Full extension at the top of the reach, wrist snaps & forearm pronates. Ball speed is made here."],
+  ["Deceleration / finish","Arm pronates across, land balanced on the front foot inside the court, back leg swings through."]
+];
+
+/* ================= STATE / STORE ================= */
+const store={
+  get k(){return "servelab_v2";},
+  load(){ try{return JSON.parse(localStorage.getItem(this.k))||{serves:[],profile:"textbook",hand:"right"};}catch(e){return {serves:[],profile:"textbook",hand:"right"};} },
+  save(s){ localStorage.setItem(this.k, JSON.stringify(s)); }
+};
+let S = store.load();
+function persist(){ store.save(S); }
+
+/* ================= SUPABASE (optional cloud sync) ================= */
+let sb=null, user=null;
+async function initSB(){
+  try{
+    const m = await import("https://esm.sh/@supabase/supabase-js@2");
+    sb = m.createClient(SUPABASE_URL, SUPABASE_ANON, {auth:{persistSession:true,autoRefreshToken:true}});
+    const {data} = await sb.auth.getSession();
+    user = data?.session?.user || null;
+    sb.auth.onAuthStateChange((_e,sess)=>{ user=sess?.user||null; renderAuth(); if(user) pullCloud(); });
+    renderAuth();
+    if(user) pullCloud();
+  }catch(e){ console.warn("sync unavailable",e); }
+}
+function renderAuth(){
+  const chip=$("#authChip"), txt=$("#authTxt");
+  if(user){ chip.classList.add("on"); txt.textContent = (user.email||"Synced").split("@")[0]; }
+  else{ chip.classList.remove("on"); txt.textContent="Local"; }
+}
+async function pushServe(rec){
+  if(!sb||!user) return;
+  try{
+    let thumb_path=null;
+    if(rec.thumb){
+      const blob=await (await fetch(rec.thumb)).blob();
+      thumb_path=user.id+"/"+rec.id+".jpg";
+      await sb.storage.from("thumbs").upload(thumb_path, blob, {upsert:true,contentType:"image/jpeg"});
+    }
+    await sb.from("serves").insert({id:rec.id,user_id:user.id,session_id:rec.session,recorded_at:new Date(rec.t).toISOString(),
+      pro_profile:rec.profile,handedness:rec.hand,score:rec.score,metrics:rec.metrics,phases:rec.phaseInfo||{},
+      faults:rec.faults||[],speed_kmh:rec.speed||null,placement:rec.placement||null,thumb_path});
+  }catch(e){console.warn("push failed",e);}
+}
+async function pullCloud(){
+  if(!sb||!user) return;
+  try{
+    const {data,error}=await sb.from("serves").select("*").order("recorded_at",{ascending:false}).limit(500);
+    if(error||!data) return;
+    const have=new Set(S.serves.map(s=>s.id));
+    for(const r of data){
+      if(have.has(r.id)) continue;
+      S.serves.push({id:r.id,session:r.session_id,t:new Date(r.recorded_at).getTime(),profile:r.pro_profile,hand:r.handedness,
+        score:r.score,metrics:r.metrics,faults:r.faults,speed:r.speed_kmh,placement:r.placement,thumb:null,cloud:true});
+    }
+    S.serves.sort((a,b)=>b.t-a.t); persist(); renderServes(); renderProgress();
+    toast("Synced "+data.length+" serves");
+  }catch(e){console.warn(e);}
+}
+
+/* ================= POSE ENGINE ================= */
+let landmarker=null, loadingModel=null;
+async function getLandmarker(){
+  if(landmarker) return landmarker;
+  if(loadingModel) return loadingModel;
+  loadingModel=(async()=>{
+    const vision=await FilesetResolver.forVisionTasks(WASM_URL);
+    let lm;
+    try{
+      lm=await PoseLandmarker.createFromOptions(vision,{baseOptions:{modelAssetPath:MODEL_URL,delegate:"GPU"},
+        runningMode:"VIDEO",numPoses:1,minPoseDetectionConfidence:.5,minTrackingConfidence:.5});
+    }catch(e){
+      lm=await PoseLandmarker.createFromOptions(vision,{baseOptions:{modelAssetPath:MODEL_URL,delegate:"CPU"},
+        runningMode:"VIDEO",numPoses:1});
+    }
+    landmarker=lm; return lm;
+  })();
+  return loadingModel;
+}
+function seek(video,t){
+  return new Promise(res=>{
+    const on=()=>{video.removeEventListener("seeked",on); requestAnimationFrame(()=>requestAnimationFrame(res));};
+    video.addEventListener("seeked",on);
+    video.currentTime=t;
+  });
+}
+let cancelProc=false;
+async function processVideo(file){
+  cancelProc=false;
+  const lm=await getLandmarker();
+  const video=$("#stageVid");
+  const ov=$("#stageOv");
+  const url=URL.createObjectURL(file);
+  video.src=url;
+  await once(video,"loadedmetadata");
+  try{ await video.play(); video.pause(); }catch(e){}
+  video.currentTime=0;
+  const W=video.videoWidth, H=video.videoHeight;
+  ov.width=W; ov.height=H;
+  const octx=ov.getContext("2d");
+  const dur=video.duration||0;
+  const targetFps=30;
+  const step=Math.max(1/targetFps, dur/600); // cap ~600 frames
+  const frames=[];
+  let ts=0;
+  $("#procStage").textContent="Tracking your body…";
+  for(let t=0;t<dur-1e-3;t+=step){
+    if(cancelProc){ URL.revokeObjectURL(url); return null; }
+    await seek(video,t);
+    ts+=Math.round(step*1000)||33;
+    let res=null;
+    try{ res=lm.detectForVideo(video,ts); }catch(e){}
+    const p=res&&res.landmarks&&res.landmarks[0]?res.landmarks[0]:null;
+    const w=res&&res.worldLandmarks&&res.worldLandmarks[0]?res.worldLandmarks[0]:null;
+    frames.push({t,p,w});
+    // live overlay
+    octx.clearRect(0,0,W,H);
+    if(p) drawSkeleton(octx,p,W,H,"rgba(216,232,56,.9)","rgba(255,255,255,.85)",3);
+    const pct=Math.min(1,t/dur);
+    $("#procFill").style.width=(pct*100).toFixed(0)+"%";
+    $("#procPct").textContent=Math.round(pct*100)+"% · "+frames.length+" frames";
+  }
+  URL.revokeObjectURL(url);
+  return {frames,W,H,file,dur};
+}
+
+/* ================= SEGMENTATION + ANALYSIS ================= */
+function idxFor(hand){
+  // racket (dominant) side + toss side
+  return hand==="left"
+    ? {sh:LM.Lsh,el:LM.Lel,wr:LM.Lwr,hip:LM.Lhip,kn:LM.Lkn,ank:LM.Lank, tsh:LM.Rsh,tel:LM.Rel,twr:LM.Rwr}
+    : {sh:LM.Rsh,el:LM.Rel,wr:LM.Rwr,hip:LM.Rhip,kn:LM.Rkn,ank:LM.Rank, tsh:LM.Lsh,tel:LM.Lel,twr:LM.Lwr};
+}
+function smooth(arr,win=2){
+  const out=arr.slice();
+  for(let i=0;i<arr.length;i++){
+    let s=0,n=0;
+    for(let j=-win;j<=win;j++){const k=i+j; if(k>=0&&k<arr.length&&arr[k]!=null){s+=arr[k];n++;}}
+    out[i]=n?s/n:arr[i];
+  }
+  return out;
+}
+function elbowFlex(fr,I){ // world-landmark elbow flexion
+  const w=fr.w; if(!w) return null;
+  const a=angle3(w[I.sh],w[I.el],w[I.wr]); return isNaN(a)?null:180-a;
+}
+function detectServes(frames,hand){
+  const I=idxFor(hand);
+  // wrist height above shoulder (image coords, y down): positive = wrist above shoulder
+  const h=frames.map(f=> f.p ? (f.p[I.sh].y - f.p[I.wr].y) : null);
+  const hs=smooth(h,2);
+  const valid=hs.map(v=>v!=null);
+  let hmax=-1e9,hmin=1e9;
+  hs.forEach(v=>{if(v!=null){hmax=Math.max(hmax,v);hmin=Math.min(hmin,v);}});
+  if(hmax<=-1e8) return [];
+  const thr=hmin+(hmax-hmin)*0.72;
+  // candidate peaks: local maxima above threshold, wrist above nose, arm fairly extended
+  const cand=[];
+  for(let i=2;i<hs.length-2;i++){
+    if(hs[i]==null) continue;
+    if(hs[i]>=thr && hs[i]>=hs[i-1] && hs[i]>=hs[i+1] && hs[i]>=hs[i-2] && hs[i]>=hs[i+2]){
+      const f=frames[i];
+      const aboveHead = f.p ? (f.p[I.wr].y < f.p[LM.nose].y) : false;
+      const ef=elbowFlex(f,I);
+      if(aboveHead && (ef==null || ef<70)) cand.push({i,h:hs[i]});
+    }
+  }
+  // merge peaks within 1.0s, keep highest
+  cand.sort((a,b)=>b.h-a.h);
+  const chosen=[];
+  for(const c of cand){
+    const tc=frames[c.i].t;
+    if(chosen.every(k=>Math.abs(frames[k.i].t-tc)>1.0)) chosen.push(c);
+  }
+  chosen.sort((a,b)=>a.i-b.i);
+  return chosen.map(c=>c.i);
+}
+function findKey(frames,ci,hand){
+  const I=idxFor(hand);
+  const tc=frames[ci].t;
+  const at=(cond,lo,hi,pick)=>{ // scan window [tc+lo,tc+hi], pick extreme
+    let best=null,bestV=null;
+    for(let i=0;i<frames.length;i++){
+      const f=frames[i]; if(!f.p) continue;
+      if(f.t<tc+lo||f.t>tc+hi) continue;
+      const v=pick(f); if(v==null||isNaN(v)) continue;
+      if(bestV==null||cond(v,bestV)){bestV=v;best=i;}
+    }
+    return best;
+  };
+  // loading/trophy: deepest knee bend before contact
+  const kneeFlex=f=>{const w=f.w;if(!w)return null;const a=angle3(w[I.hip],w[I.kn],w[I.ank]);return isNaN(a)?null:180-a;};
+  const trophyI = at((v,b)=>v>b, -0.85, -0.12, kneeFlex) ?? Math.max(0,ci-8);
+  return {contact:ci, trophy:trophyI};
+}
+function computeMetrics(frames,keys,hand){
+  const I=idxFor(hand);
+  const T=frames[keys.trophy], C=frames[keys.contact];
+  const m={};
+  // trophy metrics
+  if(T&&T.w){
+    m.kneeBend = 180-angle3(T.w[I.hip],T.w[I.kn],T.w[I.ank]);
+    m.elbowTrophy = 180-angle3(T.w[I.sh],T.w[I.el],T.w[I.wr]);
+    m.shoulderTrophy = angle3(T.w[I.el],T.w[I.sh],T.w[I.hip]);
+  }
+  // contact metrics
+  if(C&&C.w){
+    m.elbowContact = 180-angle3(C.w[I.sh],C.w[I.el],C.w[I.wr]);
+    m.shoulderContact = angle3(C.w[I.el],C.w[I.sh],C.w[I.hip]);
+  }
+  if(C&&C.p){
+    const shM=mid(C.p[LM.Lsh],C.p[LM.Rsh]), hpM=mid(C.p[LM.Lhip],C.p[LM.Rhip]);
+    m.trunkTilt = tiltFromVertical(hpM,shM);
+    const torso=Math.hypot(shM.x-hpM.x, shM.y-hpM.y)||1e-6;
+    m.contactHeight = (C.p[LM.nose].y - C.p[I.wr].y)/torso; // wrist above nose in torso-lengths
+  }
+  // clean
+  for(const k in m){ if(m[k]==null||isNaN(m[k])) delete m[k]; }
+  return m;
+}
+function scoreMetric(key,v,bands){
+  const b=bands[key]; if(!b||v==null) return null;
+  const [lo,hi]=b;
+  if(v>=lo&&v<=hi) return 100;
+  const soft = key==="contactHeight" ? 0.5 : 45;
+  const d = v<lo? lo-v : v-hi;
+  return Math.max(0,Math.round(100 - (d/soft)*100));
+}
+function analyzeSession(result,hand,profileKey){
+  const {frames}=result;
+  const serveIdx=detectServes(frames,hand);
+  const profile=PROFILES[profileKey];
+  const serves=[];
+  for(const ci of serveIdx){
+    const keys=findKey(frames,ci,hand);
+    const metrics=computeMetrics(frames,keys,hand);
+    if(Object.keys(metrics).length<3) continue;
+    // score
+    let tot=0,wsum=0; const mscores={};
+    for(const M of METRICS){
+      const sc=scoreMetric(M.key,metrics[M.key],profile.bands);
+      if(sc!=null){mscores[M.key]=sc; tot+=sc*M.w; wsum+=M.w;}
+    }
+    const score=wsum? Math.round(tot/wsum):null;
+    const faults=deriveFaults(metrics,profile.bands);
+    serves.push({keys,metrics,mscores,score,faults, tContact:frames[ci].t});
+  }
+  return {serves,frames,hand,profileKey};
+}
+function deriveFaults(m,bands){
+  const F=[];
+  const lo=(k)=>bands[k][0], hi=(k)=>bands[k][1];
+  if(m.kneeBend!=null && m.kneeBend<lo("kneeBend")-8) F.push({t:"Shallow knee bend",d:"You're not loading your legs — most of the power in a serve starts from the ground up.",drills:["legDrive","pauseTrophy"]});
+  if(m.elbowContact!=null && m.elbowContact>hi("elbowContact")+14) F.push({t:"Bent arm at contact",d:"Your arm isn't straightening at contact, so you're striking lower and slower than you could.",drills:["reachDrill","tossHigher"]});
+  if(m.contactHeight!=null && m.contactHeight<bands.contactHeight[0]-0.06) F.push({t:"Low contact point",d:"You're hitting the ball too low — a higher strike opens up more court and pace.",drills:["tossHigher","reachDrill"]});
+  if(m.trunkTilt!=null && m.trunkTilt<lo("trunkTilt")-8) F.push({t:"Upright torso",d:"Little shoulder-over-shoulder tilt — you're missing the cartwheel that stacks power up into the ball.",drills:["cartwheelDrill","tiltDrill"]});
+  if(m.elbowTrophy!=null && (m.elbowTrophy<lo("elbowTrophy")-18||m.elbowTrophy>hi("elbowTrophy")+18)) F.push({t:"Racket-drop setup",d:"Trophy elbow bend is off, which limits the racket-head drop where real racket speed comes from.",drills:["backScratch","trophyPos"]});
+  if(m.shoulderTrophy!=null && m.shoulderTrophy>hi("shoulderTrophy")+20) F.push({t:"Flared trophy arm",d:"Hitting arm is drifting away from your head in the trophy — costs you a clean, repeatable drop.",drills:["trophyPos"]});
+  return F;
+}
+
+/* ================= SKELETON RENDERING ================= */
+const CONN=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28],[27,31],[28,32],[15,17],[16,18]];
+function drawSkeleton(ctx,p,W,H,jointCol,boneCol,lw){
+  ctx.lineWidth=lw; ctx.strokeStyle=boneCol;
+  for(const [a,b] of CONN){
+    if(!p[a]||!p[b]) continue;
+    if((p[a].visibility!=null&&p[a].visibility<.4)||(p[b].visibility!=null&&p[b].visibility<.4)) continue;
+    ctx.beginPath(); ctx.moveTo(p[a].x*W,p[a].y*H); ctx.lineTo(p[b].x*W,p[b].y*H); ctx.stroke();
+  }
+  ctx.fillStyle=jointCol;
+  for(let i=11;i<=28;i++){ if(!p[i]||(p[i].visibility!=null&&p[i].visibility<.4)) continue;
+    ctx.beginPath(); ctx.arc(p[i].x*W,p[i].y*H,lw+1.5,0,7); ctx.fill(); }
+}
+// ideal position of point c so angle(a,b,c)=target, keeping |bc|
+function rot2(cx,cy,x,y,deg){const r=deg*Math.PI/180,c=Math.cos(r),s=Math.sin(r);const dx=x-cx,dy=y-cy;return [cx+dx*c-dy*s, cy+dx*s+dy*c];}
+function idealThird(a,b,c,target){
+  const cur=angle3({x:a.x,y:a.y,z:0},{x:b.x,y:b.y,z:0},{x:c.x,y:c.y,z:0});
+  const need=target-cur;
+  const [x1,y1]=rot2(b.x,b.y,c.x,c.y,need);
+  const [x2,y2]=rot2(b.x,b.y,c.x,c.y,-need);
+  const a1=angle3({x:a.x,y:a.y,z:0},{x:b.x,y:b.y,z:0},{x:x1,y:y1,z:0});
+  return Math.abs(a1-target)<1 ? {x:x1,y:y1} : {x:x2,y:y2};
+}
+// draw a keyframe with skeleton + ghost reference for the focused metric group
+function renderKeyframe(canvas, frame, hand, phase, bands){
+  const ctx=canvas.getContext("2d"), W=canvas.width, H=canvas.height;
+  ctx.clearRect(0,0,W,H);
+  if(!frame||!frame.p) return;
+  const p=frame.p, I=idxFor(hand);
+  // ghost reference (dashed) — use mid of target band for the arm/knee of this phase
+  ctx.save(); ctx.setLineDash([6,6]); ctx.lineWidth=3; ctx.strokeStyle="rgba(59,130,196,.9)";
+  const mid2=k=>(bands[k][0]+bands[k][1])/2;
+  const drawGhost=(a,b,c,targetInterior)=>{
+    const ci=idealThird(a,b,c,targetInterior);
+    ctx.beginPath(); ctx.moveTo(a.x*W,a.y*H); ctx.lineTo(b.x*W,b.y*H); ctx.lineTo(ci.x*W,ci.y*H); ctx.stroke();
+    ctx.fillStyle="rgba(59,130,196,.9)";
+    for(const q of [a,b,ci]){ctx.beginPath();ctx.arc(q.x*W,q.y*H,4,0,7);ctx.fill();}
+  };
+  if(phase==="trophy"){
+    drawGhost(p[I.sh],p[I.el],p[I.wr], 180-mid2("elbowTrophy"));  // arm
+    drawGhost(p[I.hip],p[I.kn],p[I.ank], 180-mid2("kneeBend"));   // knee
+  }else{
+    drawGhost(p[I.sh],p[I.el],p[I.wr], 180-mid2("elbowContact")); // straight arm
+  }
+  ctx.restore();
+  // user skeleton
+  drawSkeleton(ctx,p,W,H,"rgba(216,232,56,.95)","rgba(243,246,244,.9)",3);
+  // highlight the measured joints
+  ctx.fillStyle="var(--pop)";
+}
+
+/* ================= VIEW: RESULTS ================= */
+let lastFrames=null, lastResult=null; // keep frames of current analysis in memory for detail/ball
+function ringSVG(score,size=76){
+  const r=(size-10)/2, c=2*Math.PI*r, col = score>=80?"var(--good)":score>=60?"var(--warn)":"var(--bad)";
+  const off=c*(1-(score||0)/100);
+  return `<svg width="${size}" height="${size}"><circle cx="${size/2}" cy="${size/2}" r="${r}" stroke="var(--line)" stroke-width="7" fill="none"/>
+    <circle cx="${size/2}" cy="${size/2}" r="${r}" stroke="${col}" stroke-width="7" fill="none" stroke-linecap="round"
+    stroke-dasharray="${c}" stroke-dashoffset="${off}"/></svg><div class="val">${score??"–"}<small>SCORE</small></div>`;
+}
+function badgeFor(score){ const c=score>=80?"g":score>=60?"w":"b"; const t=score>=80?"Strong":score>=60?"Solid":"Work on it"; return `<span class="badge ${c}">${t}</span>`; }
+
+async function showResults(analysis, result){
+  lastFrames=result.frames; lastResult=analysis;
+  $("#captureCard").classList.add("hidden");
+  $("#procCard").classList.add("hidden");
+  const card=$("#resultCard"); card.classList.remove("hidden");
+  const serves=analysis.serves;
+  if(!serves.length){
+    $("#sessRing").innerHTML=ringSVG(null);
+    $("#sessTitle").textContent="No serves detected";
+    $("#sessSub").textContent="Make sure your whole body is in frame, filmed from the side. Try again with a clearer angle.";
+    $("#sessServes").innerHTML="";
+    return;
+  }
+  const avg=Math.round(serves.reduce((s,x)=>s+(x.score||0),0)/serves.length);
+  $("#sessRing").innerHTML=ringSVG(avg);
+  $("#sessTitle").textContent=serves.length+(serves.length>1?" serves":" serve");
+  $("#sessSub").innerHTML="Avg score "+badgeFor(avg);
+  const session=uid(), now=Date.now();
+  const list=$("#sessServes"); list.innerHTML="";
+  const saved=[];
+  for(let i=0;i<serves.length;i++){
+    const sv=serves[i];
+    const thumb=await makeThumb(result, sv.keys.contact);
+    const rec={id:uid(),session,t:now+i,profile:analysis.profileKey,hand:analysis.hand,score:sv.score,
+      metrics:sv.metrics,mscores:sv.mscores,faults:sv.faults,thumb,keys:sv.keys,speed:null,placement:null};
+    saved.push(rec);
+    S.serves.unshift(rec);
+    const it=el("div","sitem");
+    it.innerHTML=`<img class="th" src="${thumb}"><div class="meta"><h4>Serve ${i+1} ${badgeFor(sv.score)}</h4>
+      <p class="muted tiny" style="margin:3px 0 0">${sv.faults.length?sv.faults[0].t:"Clean fundamentals"}</p></div>
+      <div class="ring" style="width:52px;height:52px">${ringSVG(sv.score,52)}</div>`;
+    it.onclick=()=>openDetail(rec);
+    list.appendChild(it);
+  }
+  persist();
+  for(const r of saved) pushServe(r);
+  renderServes(); renderProgress(); renderReco();
+}
+async function makeThumb(result, frameIdx){
+  const f=result.frames[frameIdx]; if(!f) return "";
+  const video=$("#stageVid");
+  await seek(video, f.t);
+  const scale=Math.min(1, 360/result.W);
+  const cw=Math.round(result.W*scale), ch=Math.round(result.H*scale);
+  const cv=document.createElement("canvas"); cv.width=cw; cv.height=ch;
+  const cx=cv.getContext("2d"); cx.drawImage(video,0,0,cw,ch);
+  if(f.p) drawSkeleton(cx,f.p,cw,ch,"rgba(216,232,56,.95)","rgba(255,255,255,.85)",2);
+  return cv.toDataURL("image/jpeg",0.72);
+}
+
+/* ================= SERVE DETAIL ================= */
+function openDetail(rec){
+  const prof=PROFILES[rec.profile]||PROFILES.textbook;
+  const body=$("#dBody");
+  $("#dTitle").innerHTML=`Serve ${badgeFor(rec.score)}`;
+  const detFrames = lastFrames; // may be null if from history
+  let html=`<div style="display:flex;gap:14px;align-items:center;margin-bottom:14px">
+    <div class="ring">${ringSVG(rec.score)}</div>
+    <div style="flex:1"><div class="eyebrow">vs ${prof.name}</div>
+    <p class="muted small" style="margin:4px 0 0">${rec.faults.length? rec.faults.length+" thing"+(rec.faults.length>1?"s":"")+" to sharpen":"Clean, well-balanced serve."}</p></div></div>`;
+
+  // keyframe canvas (only if frames in memory)
+  if(detFrames && rec.keys){
+    html+=`<div class="seg mb" id="phaseSeg"><button class="on" data-p="trophy">Trophy</button><button data-p="contact">Contact</button></div>
+      <canvas id="kfCanvas" style="width:100%;border-radius:12px;background:#0a1119;aspect-ratio:${lastResult?lastResult.frames&&1:1}"></canvas>
+      <div class="legend mb"><b><i style="background:var(--pop)"></i>You</b><b><i style="background:var(--court2)"></i>Ideal ${prof.name}</b></div>`;
+  }
+  // metrics
+  html+=`<div class="card" style="box-shadow:none">`;
+  for(const M of METRICS){
+    const v=rec.metrics[M.key]; if(v==null) continue;
+    const b=prof.bands[M.key], sc=rec.mscores?rec.mscores[M.key]:scoreMetric(M.key,v,prof.bands);
+    // bar range
+    const min = M.key==="contactHeight"?0: (M.key==="trunkTilt"?0:0);
+    const max = M.key==="contactHeight"?1.4: 180;
+    const bl=clamp((b[0]-min)/(max-min),0,1)*100, bw=clamp((Math.min(b[1],max)-b[0])/(max-min),0,1)*100;
+    const cur=clamp((v-min)/(max-min),0,1)*100;
+    const col=sc>=80?"var(--good)":sc>=55?"var(--warn)":"var(--bad)";
+    html+=`<div class="metric"><div class="top"><span class="name">${M.label}</span>
+      <span class="vals"><b style="color:${col}">${metricDisplay(M.key,v)}</b> · target ${M.key==="contactHeight"?b[0].toFixed(2)+"×+":Math.round(b[0])+"–"+Math.round(b[1])+"°"}</span></div>
+      <div class="mbar"><span class="band" style="left:${bl}%;width:${bw}%"></span><span class="cur" style="left:${cur}%"></span></div>
+      <div class="fx">${M.note}</div></div>`;
+  }
+  html+=`</div>`;
+  // faults / drills
+  if(rec.faults.length){
+    html+=`<h3 style="margin:16px 0 10px">Fix these</h3>`;
+    for(const f of rec.faults){
+      html+=`<div class="drill"><h4>${f.t}</h4><p>${f.d}</p>`;
+      for(const dk of f.drills){const d=DRILLS[dk]; if(d) html+=`<p><span class="why">${d.n} (${d.rx}):</span> ${d.how}</p>`;}
+      html+=`</div>`;
+    }
+  }
+  // ball
+  html+=`<button class="btn pop" id="ballBtn" style="margin-top:16px">🎾 ${rec.speed?("Speed "+rec.speed+" km/h · "+ (rec.placement||"—")):"Add ball speed & placement"}</button>`;
+  body.innerHTML=html;
+
+  if(detFrames && rec.keys){
+    const cv=$("#kfCanvas");
+    const r=lastResult; cv.width=r?r.frames? (document.querySelector("#stageVid").videoWidth||720):720:720;
+    // set canvas pixel size to video
+    cv.width = $("#stageVid").videoWidth||720; cv.height=$("#stageVid").videoHeight||1280;
+    const paint=async(phase)=>{
+      const fi = phase==="trophy"?rec.keys.trophy:rec.keys.contact;
+      const f=detFrames[fi]; if(!f) return;
+      await seek($("#stageVid"), f.t);
+      const ctx=cv.getContext("2d"); ctx.drawImage($("#stageVid"),0,0,cv.width,cv.height);
+      ctx.globalAlpha=1; renderKeyframe(cv,f,rec.hand,phase,prof.bands);
+    };
+    paint("trophy");
+    $$("#phaseSeg button").forEach(b=>b.onclick=()=>{$$("#phaseSeg button").forEach(x=>x.classList.remove("on"));b.classList.add("on");paint(b.dataset.p);});
+  }
+  $("#ballBtn").onclick=()=>openBall(rec);
+  openModal("#detailModal");
+}
+
+/* ================= BALL TOOL ================= */
+function openBall(rec){
+  const body=$("#ballBody");
+  const hasFrames = lastFrames && rec.keys;
+  body.innerHTML=`
+  ${hasFrames?`<p class="muted small mb">Tap the ball at contact, then scrub to where it lands and tap again. Set a real-world distance once for scale.</p>
+   <div class="overlaywrap"><canvas id="ballCv" style="width:100%;border-radius:12px;background:#0a1119"></canvas></div>
+   <input type="range" id="ballScrub" min="0" max="100" value="0" style="width:100%;margin:12px 0">
+   <div class="seg mb" id="ballStep"><button class="on" data-s="contact">1 · Contact</button><button data-s="land">2 · Landing</button><button data-s="scale">3 · Scale</button></div>
+   <p class="hint" id="ballHint">Tap the ball at the contact frame.</p>
+   <input class="f mb" id="scaleM" type="number" inputmode="decimal" placeholder="Known distance in metres (e.g. service box = 6.4)">
+   `:`<p class="muted small mb">Enter details manually.</p>
+   <label class="fl">Serve speed (km/h)</label><input class="f mb" id="mSpeed" type="number" inputmode="numeric" placeholder="e.g. 165" value="${rec.speed||""}">`}
+  <label class="fl">Where did it land?</label>
+  <svg class="court" viewBox="0 0 120 160"><rect x="8" y="6" width="104" height="148" rx="2" fill="none" stroke="var(--line)" stroke-width="1.5"/>
+   <line x1="8" y1="80" x2="112" y2="80" stroke="var(--court2)" stroke-width="2"/>
+   <line x1="60" y1="80" x2="60" y2="154" stroke="var(--line)"/>
+   <line x1="8" y1="117" x2="112" y2="117" stroke="var(--line)" stroke-dasharray="3 3"/></svg>
+  <div class="zg" id="zoneGrid">
+   <button data-z="Deuce Wide">Deuce · Wide</button><button data-z="Deuce Body">Deuce · Body</button><button data-z="Deuce T">Deuce · T</button>
+   <button data-z="Ad T">Ad · T</button><button data-z="Ad Body">Ad · Body</button><button data-z="Ad Wide">Ad · Wide</button>
+  </div>
+  <button class="btn primary" id="ballSave" style="margin-top:16px">Save</button>`;
+
+  let placement=rec.placement||null, speed=rec.speed||null;
+  let pts={contact:null,land:null,scaleA:null,scaleB:null}, step="contact";
+  $$("#zoneGrid button").forEach(b=>{ if(b.dataset.z===placement)b.classList.add("on");
+    b.onclick=()=>{$$("#zoneGrid button").forEach(x=>x.classList.remove("on"));b.classList.add("on");placement=b.dataset.z;};});
+
+  if(hasFrames){
+    const cv=$("#ballCv"); cv.width=$("#stageVid").videoWidth||720; cv.height=$("#stageVid").videoHeight||1280;
+    const frames=lastFrames;
+    const scrub=$("#ballScrub");
+    let curFi=rec.keys.contact;
+    const drawAt=async(fi)=>{ curFi=fi; const f=frames[fi]; if(!f)return; await seek($("#stageVid"),f.t);
+      const ctx=cv.getContext("2d"); ctx.drawImage($("#stageVid"),0,0,cv.width,cv.height);
+      // marks
+      const dm=(pt,col)=>{if(!pt)return;ctx.strokeStyle=col;ctx.lineWidth=3;ctx.beginPath();ctx.arc(pt.x,pt.y,10,0,7);ctx.stroke();ctx.beginPath();ctx.moveTo(pt.x-14,pt.y);ctx.lineTo(pt.x+14,pt.y);ctx.moveTo(pt.x,pt.y-14);ctx.lineTo(pt.x,pt.y+14);ctx.stroke();};
+      dm(pts.contact,"var(--pop)");dm(pts.land,"#e5533c");dm(pts.scaleA,"#3b82c4");dm(pts.scaleB,"#3b82c4");
+    };
+    scrub.oninput=()=>{ const fi=Math.round(scrub.value/100*(frames.length-1)); drawAt(fi); };
+    scrub.value = Math.round(rec.keys.contact/(frames.length-1)*100);
+    drawAt(rec.keys.contact);
+    cv.onclick=(e)=>{ const r=cv.getBoundingClientRect(); const x=(e.clientX-r.left)/r.width*cv.width, y=(e.clientY-r.top)/r.height*cv.height;
+      if(step==="contact"){pts.contact={x,y,fi:curFi};}
+      else if(step==="land"){pts.land={x,y,fi:curFi};}
+      else{ if(!pts.scaleA)pts.scaleA={x,y}; else pts.scaleB={x,y}; }
+      drawAt(curFi);
+    };
+    $$("#ballStep button").forEach(b=>b.onclick=()=>{$$("#ballStep button").forEach(x=>x.classList.remove("on"));b.classList.add("on");step=b.dataset.s;
+      $("#ballHint").textContent = step==="contact"?"Tap the ball at the contact frame.":step==="land"?"Scrub to the landing frame, then tap the ball.":"Tap two points a known distance apart on the court, then enter the metres.";
+    });
+  }
+
+  $("#ballSave").onclick=()=>{
+    if(hasFrames){
+      const m=parseFloat($("#scaleM").value);
+      if(pts.contact&&pts.land&&pts.scaleA&&pts.scaleB&&m>0){
+        const pxScale=Math.hypot(pts.scaleB.x-pts.scaleA.x,pts.scaleB.y-pts.scaleA.y);
+        const mPerPx=m/pxScale;
+        const distM=Math.hypot(pts.land.x-pts.contact.x,pts.land.y-pts.contact.y)*mPerPx;
+        const dt=Math.abs(lastFrames[pts.land.fi].t-lastFrames[pts.contact.fi].t)||0.001;
+        speed=Math.round(distM/dt*3.6);
+      }
+    }else{ const v=parseFloat($("#mSpeed").value); if(v>0) speed=Math.round(v); }
+    rec.speed=speed||rec.speed; rec.placement=placement||rec.placement;
+    // update store
+    const idx=S.serves.findIndex(s=>s.id===rec.id); if(idx>=0){S.serves[idx].speed=rec.speed;S.serves[idx].placement=rec.placement;}
+    persist(); pushUpdate(rec); renderServes(); renderProgress();
+    closeModal("#ballModal"); toast(speed?("Saved · "+speed+" km/h"):"Saved");
+    // refresh detail button label
+    const bb=$("#ballBtn"); if(bb) bb.innerHTML=`🎾 Speed ${rec.speed||"–"} km/h · ${rec.placement||"—"}`;
+  };
+  openModal("#ballModal");
+}
+async function pushUpdate(rec){ if(!sb||!user)return; try{await sb.from("serves").update({speed_kmh:rec.speed,placement:rec.placement}).eq("id",rec.id);}catch(e){} }
+
+/* ================= SERVES LIST ================= */
+function renderServes(){
+  const wrap=$("#servesList");
+  if(!S.serves.length){ wrap.innerHTML=`<div class="empty"><div class="big">🎾</div><p>No serves yet.<br>Head to Analyze and film a few.</p></div>`; return; }
+  // group by session/day
+  const byDay={};
+  for(const s of S.serves){ const d=new Date(s.t); const key=d.toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"});
+    (byDay[key]=byDay[key]||[]).push(s); }
+  let html="";
+  for(const day in byDay){
+    const arr=byDay[day]; const avg=Math.round(arr.reduce((a,b)=>a+(b.score||0),0)/arr.length);
+    html+=`<div class="card mb"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div><h3>${day}</h3><p class="muted tiny">${arr.length} serve${arr.length>1?"s":""}</p></div>
+      <div class="ring" style="width:48px;height:48px">${ringSVG(avg,48)}</div></div><div class="slist">`;
+    for(const s of arr){
+      html+=`<div class="sitem" data-id="${s.id}">${s.thumb?`<img class="th" src="${s.thumb}">`:`<div class="th" style="display:grid;place-items:center">🎾</div>`}
+        <div class="meta"><h4>${badgeFor(s.score)} ${s.speed?`<span class="muted small tnum">· ${s.speed} km/h</span>`:""}</h4>
+        <p class="muted tiny" style="margin:3px 0 0">${(s.faults&&s.faults.length)?s.faults[0].t:"Clean fundamentals"}${s.placement?" · "+s.placement:""}</p></div>
+        <div class="ring" style="width:46px;height:46px">${ringSVG(s.score,46)}</div></div>`;
+    }
+    html+=`</div></div>`;
+  }
+  wrap.innerHTML=html;
+  $$("#servesList .sitem").forEach(it=>it.onclick=()=>{const s=S.serves.find(x=>x.id===it.dataset.id); if(s) openDetail(s);});
+}
+
+/* ================= PROGRESS ================= */
+function lineChart(series, {w=520,h=150,pad=24,fmt=v=>Math.round(v)}={}){
+  // series: [{color,data:[{x,y}]}]  x assumed index order
+  let all=[]; series.forEach(s=>all=all.concat(s.data));
+  if(!all.length) return "";
+  const ys=all.map(p=>p.y); let lo=Math.min(...ys), hi=Math.max(...ys); if(lo===hi){lo-=1;hi+=1;}
+  lo=Math.floor(lo-(hi-lo)*.1); hi=Math.ceil(hi+(hi-lo)*.1);
+  const n=Math.max(...series.map(s=>s.data.length));
+  const X=i=>pad+(n<=1?0:(i/(n-1))*(w-pad*2));
+  const Y=v=>h-pad-((v-lo)/(hi-lo))*(h-pad*2);
+  let g="";
+  for(let k=0;k<=3;k++){const yy=pad+k/3*(h-pad*2);g+=`<line x1="${pad}" y1="${yy}" x2="${w-pad}" y2="${yy}" stroke="var(--line)" stroke-width="1"/>`;}
+  g+=`<text x="${pad}" y="${Y(hi)-4}" fill="var(--ink3)" font-size="10">${fmt(hi)}</text><text x="${pad}" y="${h-pad+12}" fill="var(--ink3)" font-size="10">${fmt(lo)}</text>`;
+  for(const s of series){
+    if(!s.data.length) continue;
+    let d=s.data.map((p,i)=>`${i?"L":"M"}${X(i).toFixed(1)},${Y(p.y).toFixed(1)}`).join(" ");
+    g+=`<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+    const last=s.data[s.data.length-1];
+    g+=`<circle cx="${X(s.data.length-1)}" cy="${Y(last.y)}" r="4" fill="${s.color}"/>`;
+  }
+  return `<svg class="chart" viewBox="0 0 ${w} ${h}">${g}</svg>`;
+}
+function renderProgress(){
+  const wrap=$("#progressBody");
+  const serves=[...S.serves].sort((a,b)=>a.t-b.t);
+  if(serves.length<1){ wrap.innerHTML=`<div class="empty"><div class="big">📈</div><p>Your trends appear here once you've logged serves.</p></div>`; return; }
+  const scores=serves.filter(s=>s.score!=null);
+  const best=Math.max(...scores.map(s=>s.score));
+  const speeds=serves.filter(s=>s.speed).map(s=>s.speed);
+  const topSpeed=speeds.length?Math.max(...speeds):null;
+  const recent=scores.slice(-10);
+  const avgRecent=recent.length?Math.round(recent.reduce((a,b)=>a+b.score,0)/recent.length):"–";
+  let html=`<div class="tiles mb">
+    <div class="tile"><div class="k">Serves logged</div><div class="v tnum">${serves.length}</div></div>
+    <div class="tile"><div class="k">Best score</div><div class="v tnum">${best}</div></div>
+    <div class="tile"><div class="k">Recent avg</div><div class="v tnum">${avgRecent}</div></div>
+    <div class="tile"><div class="k">Top speed</div><div class="v tnum">${topSpeed?topSpeed+" <small>km/h</small>":"–"}</div></div>
+  </div>`;
+  html+=`<div class="card mb"><h3 class="mb">Overall score</h3>${lineChart([{color:"var(--pop)",data:scores.map((s,i)=>({x:i,y:s.score}))}])}</div>`;
+  // metric trends
+  const mk=(key,col)=>({color:col,data:serves.filter(s=>s.metrics&&s.metrics[key]!=null).map((s,i)=>({x:i,y:s.metrics[key]}))});
+  html+=`<div class="card mb"><h3 class="mb">Key angles over time</h3>
+    ${lineChart([mk("kneeBend","var(--court2)"),mk("elbowContact","var(--bad)"),mk("trunkTilt","var(--good)")])}
+    <div class="legend"><b><i style="background:var(--court2)"></i>Knee bend</b><b><i style="background:var(--bad)"></i>Arm ext @ contact</b><b><i style="background:var(--good)"></i>Body tilt</b></div></div>`;
+  if(speeds.length){
+    html+=`<div class="card mb"><h3 class="mb">Serve speed</h3>${lineChart([{color:"var(--warn)",data:serves.filter(s=>s.speed).map((s,i)=>({x:i,y:s.speed}))}],{fmt:v=>Math.round(v)+" km/h"})}</div>`;
+  }
+  // placement
+  const zones={}; serves.forEach(s=>{if(s.placement)zones[s.placement]=(zones[s.placement]||0)+1;});
+  if(Object.keys(zones).length){
+    const tot=Object.values(zones).reduce((a,b)=>a+b,0);
+    html+=`<div class="card"><h3 class="mb">Placement</h3>`;
+    for(const z in zones){const pct=Math.round(zones[z]/tot*100);
+      html+=`<div class="metric"><div class="top"><span class="name">${z}</span><span class="vals">${zones[z]} · ${pct}%</span></div><div class="mbar"><span class="band" style="left:0;width:${pct}%;background:var(--court)"></span></div></div>`;}
+    html+=`</div>`;
+  }
+  wrap.innerHTML=html;
+}
+
+/* ================= COACH ================= */
+function renderCoach(){
+  // profiles
+  const seg=$("#profileSeg"); seg.innerHTML="";
+  for(const k in PROFILES){const b=el("button",k===S.profile?"on":"",PROFILES[k].name.split(" (")[0]);
+    b.onclick=()=>{S.profile=k;persist();renderCoach();}; seg.appendChild(b);}
+  $("#profileDesc").textContent=PROFILES[S.profile].desc;
+  // phases
+  $("#phaseList").innerHTML=PHASES.map((p,i)=>`<div class="phase"><div class="num">${i+1}</div><div><h4>${p[0]}</h4><p>${p[1]}</p></div></div>`).join("");
+  // library
+  $("#drillLib").innerHTML=Object.values(DRILLS).map(d=>`<div class="drill"><h4>${d.n}<span class="rx">${d.rx}</span></h4><p><span class="why">Why:</span> ${d.why}</p><p>${d.how}</p></div>`).join("");
+  renderReco();
+}
+function renderReco(){
+  const wrap=$("#recoDrills");
+  const recent=S.serves.slice(0,8);
+  const counts={};
+  recent.forEach(s=>(s.faults||[]).forEach(f=>f.drills.forEach(d=>counts[d]=(counts[d]||0)+1)));
+  const top=Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,3).map(e=>e[0]);
+  if(!top.length){ wrap.innerHTML=`<p class="muted small">Analyze a serve and your top fixes show up here.</p>`; return; }
+  wrap.innerHTML=top.map(dk=>{const d=DRILLS[dk];return `<div class="drill"><h4>${d.n}<span class="rx">${d.rx}</span></h4><p><span class="why">Why:</span> ${d.why}</p><p>${d.how}</p></div>`;}).join("");
+}
+
+/* ================= AUTH UI ================= */
+function renderAuthSheet(){
+  const b=$("#authBody");
+  if(user){
+    b.innerHTML=`<p class="muted small mb">Signed in as <b>${user.email||"user"}</b>. Your serves sync to every device you log into.</p>
+      <button class="btn" id="signout">Sign out</button>`;
+    $("#signout").onclick=async()=>{await sb.auth.signOut(); closeModal("#authModal"); toast("Signed out");};
+  }else{
+    b.innerHTML=`<p class="muted small mb">Enter your email and we'll send a 6-digit code — no password. Your serve history then follows you across devices.</p>
+      <input class="f mb" id="authEmail" type="email" inputmode="email" placeholder="you@email.com" autocomplete="email">
+      <div id="otpWrap" class="hidden"><input class="f mb" id="authOtp" inputmode="numeric" placeholder="6-digit code"></div>
+      <button class="btn primary" id="authGo">Send code</button>
+      <p class="hint">Everything works fully without an account — this only adds cross-device sync.</p>`;
+    let stage="email";
+    $("#authGo").onclick=async()=>{
+      if(!sb){toast("Sync unavailable");return;}
+      const email=$("#authEmail").value.trim();
+      if(stage==="email"){
+        if(!email){toast("Enter your email");return;}
+        $("#authGo").innerHTML='<span class="spin"></span>';
+        const {error}=await sb.auth.signInWithOtp({email,options:{shouldCreateUser:true}});
+        $("#authGo").textContent="Verify code";
+        if(error){toast(error.message);return;}
+        $("#otpWrap").classList.remove("hidden"); stage="otp"; toast("Check your email");
+      }else{
+        const token=$("#authOtp").value.trim();
+        if(token.length<6){toast("Enter the 6-digit code");return;}
+        $("#authGo").innerHTML='<span class="spin"></span>';
+        const {error}=await sb.auth.verifyOtp({email,token,type:"email"});
+        $("#authGo").textContent="Verify code";
+        if(error){toast(error.message);return;}
+        closeModal("#authModal"); toast("Signed in — syncing"); renderAuthSheet();
+      }
+    };
+  }
+}
+
+/* ================= MODALS / NAV ================= */
+function openModal(sel){$(sel).classList.add("open");document.body.style.overflow="hidden";}
+function closeModal(sel){$(sel).classList.remove("open");document.body.style.overflow="";}
+$$(".modal [data-close]").forEach(x=>x.onclick=()=>closeModal("#"+x.closest(".modal").id));
+$$("#detailModal,#ballModal,#authModal").forEach(m=>{});
+function go(view){
+  $$(".view").forEach(v=>v.classList.remove("active"));
+  $("#v-"+view).classList.add("active");
+  $$(".nav button").forEach(b=>b.classList.toggle("on",b.dataset.view===view));
+  window.scrollTo(0,0);
+}
+$$(".nav button").forEach(b=>b.onclick=()=>go(b.dataset.view));
+$("#authChip").onclick=()=>{renderAuthSheet();openModal("#authModal");};
+
+/* theme toggle */
+$("#themeBtn").onclick=()=>{
+  const cur=document.documentElement.getAttribute("data-theme");
+  const next = cur==="dark"?"light": cur==="light"?"":"dark";
+  if(next)document.documentElement.setAttribute("data-theme",next); else document.documentElement.removeAttribute("data-theme");
+  localStorage.setItem("servelab_theme",next);
+};
+{const t=localStorage.getItem("servelab_theme"); if(t)document.documentElement.setAttribute("data-theme",t);}
+
+/* ================= CAPTURE FLOW ================= */
+$("#recBtn").onclick=()=>$("#fileRec").click();
+$("#pickBtn").onclick=()=>$("#filePick").click();
+$("#fileRec").onchange=e=>{if(e.target.files[0])runAnalysis(e.target.files[0]);};
+$("#filePick").onchange=e=>{if(e.target.files[0])runAnalysis(e.target.files[0]);};
+$("#cancelBtn").onclick=()=>{cancelProc=true;};
+$("#againBtn").onclick=()=>{$("#resultCard").classList.add("hidden");$("#captureCard").classList.remove("hidden");};
+
+async function runAnalysis(file){
+  $("#captureCard").classList.add("hidden");
+  $("#resultCard").classList.add("hidden");
+  $("#procCard").classList.remove("hidden");
+  $("#procStage").textContent="Loading AI model…";
+  $("#procFill").style.width="4%"; $("#procPct").textContent="Preparing on-device model…";
+  try{
+    await getLandmarker();
+    const result=await processVideo(file);
+    if(!result){ $("#procCard").classList.add("hidden"); $("#captureCard").classList.remove("hidden"); return; }
+    $("#procStage").textContent="Grading serves…";
+    const analysis=analyzeSession(result,S.hand,S.profile);
+    await showResults(analysis,result);
+  }catch(err){
+    console.error(err);
+    $("#procCard").classList.add("hidden"); $("#captureCard").classList.remove("hidden");
+    toast("Analysis failed — try another clip");
+  }
+}
+
+/* ================= BOOT ================= */
+renderServes(); renderProgress(); renderCoach();
+initSB();
+// warm the model in the background so first analysis is fast
+setTimeout(()=>getLandmarker().catch(()=>{}),1500);
+</script>
+</body>
+</html>
