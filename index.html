@@ -179,6 +179,15 @@ svg.chart{width:100%;height:auto;display:block;overflow:visible}
 .legend b{display:inline-flex;align-items:center;gap:6px;font-weight:600}
 .legend i{width:11px;height:3px;border-radius:2px;display:inline-block}
 a.link{color:var(--court2);text-decoration:none;font-weight:700}
+/* replay player */
+.plbar{display:flex;gap:10px;align-items:center;margin-top:12px}
+.plbtn{width:44px;height:44px;flex:none;border-radius:12px;background:var(--panel2);border:1px solid var(--line);font-size:16px;display:grid;place-items:center}
+.scrubwrap{position:relative;flex:1;display:flex;align-items:center;height:26px}
+.scrubwrap input{width:100%;margin:0;accent-color:var(--court2)}
+.scrubwrap .mk{position:absolute;top:50%;transform:translate(-50%,-50%);width:9px;height:9px;border-radius:50%;background:var(--court2);border:2px solid var(--bg);pointer-events:none}
+.scrubwrap .mk.c{background:var(--pop)}
+.metric.tap,.drill.tap{cursor:pointer}
+.metric.tap:active,.drill.tap:active{opacity:.65}
 </style>
 </head>
 <body>
@@ -407,7 +416,19 @@ const store={
   save(s){ localStorage.setItem(this.k, JSON.stringify(s)); }
 };
 let S = store.load();
-function persist(){ store.save(S); }
+function persist(){
+  try{ store.save(S); }
+  catch(e){
+    // storage full — shed replay animations from the oldest serves first, then retry
+    const oldestFirst=[...S.serves].sort((a,b)=>a.t-b.t);
+    for(const s of oldestFirst){
+      if(!s.anim) continue;
+      delete s.anim;
+      try{ store.save(S); return; }catch(_){}
+    }
+    try{ store.save(S); }catch(_){ console.warn("persist failed",e); }
+  }
+}
 
 /* ================= SUPABASE (optional cloud sync) ================= */
 let sb=null, user=null;
@@ -438,7 +459,7 @@ async function pushServe(rec){
     }
     await sb.from("serves").insert({id:rec.id,user_id:user.id,session_id:rec.session,recorded_at:new Date(rec.t).toISOString(),
       pro_profile:rec.profile,handedness:rec.hand,score:rec.score,metrics:rec.metrics,phases:rec.phaseInfo||{},
-      faults:rec.faults||[],speed_kmh:rec.speed||null,placement:rec.placement||null,thumb_path});
+      faults:rec.faults||[],speed_kmh:rec.speed||null,placement:rec.placement||null,thumb_path,anim:rec.anim||null});
   }catch(e){console.warn("push failed",e);}
 }
 async function pullCloud(){
@@ -450,7 +471,7 @@ async function pullCloud(){
     for(const r of data){
       if(have.has(r.id)) continue;
       S.serves.push({id:r.id,session:r.session_id,t:new Date(r.recorded_at).getTime(),profile:r.pro_profile,hand:r.handedness,
-        score:r.score,metrics:r.metrics,faults:r.faults,speed:r.speed_kmh,placement:r.placement,thumb:null,cloud:true});
+        score:r.score,metrics:r.metrics,faults:r.faults,speed:r.speed_kmh,placement:r.placement,thumb:null,anim:r.anim||null,cloud:true});
     }
     S.serves.sort((a,b)=>b.t-a.t); persist(); renderServes(); renderProgress();
     toast("Synced "+data.length+" serves");
@@ -659,12 +680,12 @@ function analyzeSession(result,hand,profileKey){
 function deriveFaults(m,bands){
   const F=[];
   const lo=(k)=>bands[k][0], hi=(k)=>bands[k][1];
-  if(m.kneeBend!=null && m.kneeBend<lo("kneeBend")-8) F.push({t:"Shallow knee bend",d:"You're not loading your legs — most of the power in a serve starts from the ground up.",drills:["legDrive","pauseTrophy"]});
-  if(m.elbowContact!=null && m.elbowContact>hi("elbowContact")+14) F.push({t:"Bent arm at contact",d:"Your arm isn't straightening at contact, so you're striking lower and slower than you could.",drills:["reachDrill","tossHigher"]});
-  if(m.contactHeight!=null && m.contactHeight<bands.contactHeight[0]-0.06) F.push({t:"Low contact point",d:"You're hitting the ball too low — a higher strike opens up more court and pace.",drills:["tossHigher","reachDrill"]});
-  if(m.trunkTilt!=null && m.trunkTilt<lo("trunkTilt")-8) F.push({t:"Upright torso",d:"Little shoulder-over-shoulder tilt — you're missing the cartwheel that stacks power up into the ball.",drills:["cartwheelDrill","tiltDrill"]});
-  if(m.elbowTrophy!=null && (m.elbowTrophy<lo("elbowTrophy")-18||m.elbowTrophy>hi("elbowTrophy")+18)) F.push({t:"Racket-drop setup",d:"Trophy elbow bend is off, which limits the racket-head drop where real racket speed comes from.",drills:["backScratch","trophyPos"]});
-  if(m.shoulderTrophy!=null && m.shoulderTrophy>hi("shoulderTrophy")+20) F.push({t:"Flared trophy arm",d:"Hitting arm is drifting away from your head in the trophy — costs you a clean, repeatable drop.",drills:["trophyPos"]});
+  if(m.kneeBend!=null && m.kneeBend<lo("kneeBend")-8) F.push({t:"Shallow knee bend",d:"You're not loading your legs — most of the power in a serve starts from the ground up.",drills:["legDrive","pauseTrophy"],k:"kneeBend",phase:"trophy"});
+  if(m.elbowContact!=null && m.elbowContact>hi("elbowContact")+14) F.push({t:"Bent arm at contact",d:"Your arm isn't straightening at contact, so you're striking lower and slower than you could.",drills:["reachDrill","tossHigher"],k:"elbowContact",phase:"contact"});
+  if(m.contactHeight!=null && m.contactHeight<bands.contactHeight[0]-0.06) F.push({t:"Low contact point",d:"You're hitting the ball too low — a higher strike opens up more court and pace.",drills:["tossHigher","reachDrill"],k:"contactHeight",phase:"contact"});
+  if(m.trunkTilt!=null && m.trunkTilt<lo("trunkTilt")-8) F.push({t:"Upright torso",d:"Little shoulder-over-shoulder tilt — you're missing the cartwheel that stacks power up into the ball.",drills:["cartwheelDrill","tiltDrill"],k:"trunkTilt",phase:"contact"});
+  if(m.elbowTrophy!=null && (m.elbowTrophy<lo("elbowTrophy")-18||m.elbowTrophy>hi("elbowTrophy")+18)) F.push({t:"Racket-drop setup",d:"Trophy elbow bend is off, which limits the racket-head drop where real racket speed comes from.",drills:["backScratch","trophyPos"],k:"elbowTrophy",phase:"trophy"});
+  if(m.shoulderTrophy!=null && m.shoulderTrophy>hi("shoulderTrophy")+20) F.push({t:"Flared trophy arm",d:"Hitting arm is drifting away from your head in the trophy — costs you a clean, repeatable drop.",drills:["trophyPos"],k:"shoulderTrophy",phase:"trophy"});
   return F;
 }
 
@@ -691,34 +712,135 @@ function idealThird(a,b,c,target){
   const a1=angle3({x:a.x,y:a.y,z:0},{x:b.x,y:b.y,z:0},{x:x1,y:y1,z:0});
   return Math.abs(a1-target)<1 ? {x:x1,y:y1} : {x:x2,y:y2};
 }
-// draw a keyframe with skeleton + ghost reference for the focused metric group
-function renderKeyframe(canvas, frame, hand, phase, bands){
-  const ctx=canvas.getContext("2d"), W=canvas.width, H=canvas.height;
-  ctx.clearRect(0,0,W,H);
-  if(!frame||!frame.p) return;
-  const p=frame.p, I=idxFor(hand);
-  // ghost reference (dashed) — use mid of target band for the arm/knee of this phase
+/* ================= SERVE REPLAY (stored skeleton animation) ================= */
+// Pack the frames around one serve into a compact, persistable animation:
+// coords quantised to 0–1000, visibility to 0–100, ≤72 frames, window loading→follow-through.
+function packAnim(frames,keys,W,H){
+  const fT=frames[keys.trophy], fC=frames[keys.contact];
+  if(!fT||!fC) return null;
+  const t0=Math.max(0, Math.min(fT.t,fC.t)-0.6), t1=fC.t+0.5;
+  const sel=frames.filter(f=>f.p && f.t>=t0-1e-4 && f.t<=t1+1e-4);
+  if(sel.length<4) return null;
+  const step=Math.max(1, Math.ceil(sel.length/72));
+  const fr=[];
+  for(let i=0;i<sel.length;i+=step){
+    const f=sel[i], k=[];
+    for(const q of f.p) k.push(Math.round(q.x*1000), Math.round(q.y*1000), Math.round((q.visibility==null?1:q.visibility)*100));
+    fr.push([Math.round((f.t-t0)*1000), k]);
+  }
+  if(fr.length<2) return null;
+  return {v:1, W, H, trophy:+(fT.t-t0).toFixed(3), contact:+(fC.t-t0).toFixed(3), dur:fr[fr.length-1][0]/1000, fr};
+}
+function animPose(anim,i){
+  const k=anim.fr[i][1], out=[];
+  for(let j=0;j<k.length;j+=3) out.push({x:k[j]/1000, y:k[j+1]/1000, visibility:k[j+2]/100});
+  return out;
+}
+// pose at time t (seconds), linearly interpolated between stored frames
+function animPoseAt(anim,t){
+  const fr=anim.fr, n=fr.length, ms=t*1000;
+  if(ms<=fr[0][0]) return animPose(anim,0);
+  if(ms>=fr[n-1][0]) return animPose(anim,n-1);
+  let i=0; while(i<n-2 && fr[i+1][0]<=ms) i++;
+  const a=animPose(anim,i), b=animPose(anim,i+1);
+  const u=clamp((ms-fr[i][0])/((fr[i+1][0]-fr[i][0])||1),0,1);
+  return a.map((p,j)=>({x:p.x+(b[j].x-p.x)*u, y:p.y+(b[j].y-p.y)*u, visibility:Math.min(p.visibility,b[j].visibility)}));
+}
+// dashed ideal-form ghost, points already in canvas px
+function drawGhostPx(ctx,p,hand,phase,bands){
+  const I=idxFor(hand);
   ctx.save(); ctx.setLineDash([6,6]); ctx.lineWidth=3; ctx.strokeStyle="rgba(59,130,196,.9)";
   const mid2=k=>(bands[k][0]+bands[k][1])/2;
-  const drawGhost=(a,b,c,targetInterior)=>{
-    const ci=idealThird(a,b,c,targetInterior);
-    ctx.beginPath(); ctx.moveTo(a.x*W,a.y*H); ctx.lineTo(b.x*W,b.y*H); ctx.lineTo(ci.x*W,ci.y*H); ctx.stroke();
+  const g=(a,b,c,target)=>{
+    if(!a||!b||!c) return;
+    const ci=idealThird(a,b,c,target);
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.lineTo(ci.x,ci.y); ctx.stroke();
     ctx.fillStyle="rgba(59,130,196,.9)";
-    for(const q of [a,b,ci]){ctx.beginPath();ctx.arc(q.x*W,q.y*H,4,0,7);ctx.fill();}
+    for(const q of [a,b,ci]){ctx.beginPath();ctx.arc(q.x,q.y,4,0,7);ctx.fill();}
   };
   if(phase==="trophy"){
-    drawGhost(p[I.sh],p[I.el],p[I.wr], 180-mid2("elbowTrophy"));  // arm
-    drawGhost(p[I.hip],p[I.kn],p[I.ank], 180-mid2("kneeBend"));   // knee
+    g(p[I.sh],p[I.el],p[I.wr], 180-mid2("elbowTrophy"));
+    g(p[I.hip],p[I.kn],p[I.ank], 180-mid2("kneeBend"));
   }else{
-    drawGhost(p[I.sh],p[I.el],p[I.wr], 180-mid2("elbowContact")); // straight arm
+    g(p[I.sh],p[I.el],p[I.wr], 180-mid2("elbowContact"));
   }
   ctx.restore();
-  // user skeleton
-  drawSkeleton(ctx,p,W,H,"rgba(216,232,56,.95)","rgba(243,246,244,.9)",3);
+}
+// orange highlight of the joint chain a tapped coaching point refers to
+function drawFocusPx(ctx,p,hand,key){
+  const I=idxFor(hand);
+  let pts=null;
+  if(key==="trunkTilt") pts=[mid(p[LM.Lhip],p[LM.Rhip]), mid(p[LM.Lsh],p[LM.Rsh])];
+  else if(key==="contactHeight") pts=[p[LM.nose], p[I.wr]];
+  else if(key==="kneeBend") pts=[p[I.hip],p[I.kn],p[I.ank]];
+  else if(key==="elbowTrophy"||key==="elbowContact") pts=[p[I.sh],p[I.el],p[I.wr]];
+  else if(key==="shoulderTrophy"||key==="shoulderContact") pts=[p[I.el],p[I.sh],p[I.hip]];
+  if(!pts||pts.some(q=>!q)) return;
+  ctx.save(); ctx.lineWidth=6; ctx.lineCap="round"; ctx.strokeStyle="rgba(245,176,39,.95)";
+  ctx.beginPath(); pts.forEach((q,i)=> i?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y)); ctx.stroke();
+  ctx.fillStyle="rgba(245,176,39,.95)";
+  for(const q of pts){ctx.beginPath();ctx.arc(q.x,q.y,6,0,7);ctx.fill();}
+  ctx.restore();
+}
+function mountPlayer(rec,prof){
+  const anim=rec.anim, cv=$("#plCv");
+  if(!anim||!cv) return null;
+  // bounding box of the whole motion (px space) so the figure fills the canvas
+  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+  for(const [,k] of anim.fr) for(let j=0;j<k.length;j+=3){
+    if(k[j+2]<40) continue;
+    const x=k[j]/1000*anim.W, y=k[j+1]/1000*anim.H;
+    if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y;
+  }
+  if(x0>x1){x0=0;y0=0;x1=anim.W;y1=anim.H;}
+  const mx=(x1-x0)*.2+14, my=(y1-y0)*.12+14;
+  x0-=mx; x1+=mx; y0-=my; y1+=my;
+  const bw=x1-x0, bh=y1-y0;
+  const CW=720, CH=Math.round(clamp(CW*bh/bw,380,960));
+  cv.width=CW; cv.height=CH;
+  const sc=Math.min(CW/bw,CH/bh), oxp=(CW-bw*sc)/2, oyp=(CH-bh*sc)/2;
+  const map=q=>({x:(q.x*anim.W-x0)*sc+oxp, y:(q.y*anim.H-y0)*sc+oyp, visibility:q.visibility});
+  const ctx=cv.getContext("2d");
+  const scrub=$("#plScrub"), timeEl=$("#plTime"), playBtn=$("#plPlay");
+  let t=0, playing=false, raf=0, last=0, focus=null, speed=0.5;
+  function draw(){
+    ctx.clearRect(0,0,CW,CH);
+    const p=animPoseAt(anim,t).map(map);
+    const nearT=Math.abs(t-anim.trophy)<=0.07, nearC=Math.abs(t-anim.contact)<=0.07;
+    const phase=nearT?"trophy":nearC?"contact":null;
+    if(phase) drawGhostPx(ctx,p,rec.hand,phase,prof.bands);
+    drawSkeleton(ctx,p,1,1,"rgba(216,232,56,.95)","rgba(243,246,244,.9)",4);
+    if(focus) drawFocusPx(ctx,p,rec.hand,focus);
+    if(phase){
+      ctx.save(); ctx.font="800 26px -apple-system,system-ui,sans-serif";
+      ctx.fillStyle=phase==="trophy"?"#3b82c4":"#d8e838";
+      ctx.fillText(phase==="trophy"?"TROPHY":"CONTACT",16,38); ctx.restore();
+    }
+    scrub.value=String(Math.round(t/anim.dur*1000));
+    timeEl.textContent=t.toFixed(2)+"s";
+  }
+  function pause(){ playing=false; cancelAnimationFrame(raf); playBtn.textContent="▶"; }
+  function play(){ if(playing)return; playing=true; last=performance.now(); playBtn.textContent="⏸"; raf=requestAnimationFrame(tick); }
+  function tick(now){
+    if(!playing) return;
+    if(!$("#detailModal").classList.contains("open")){ pause(); return; }
+    const dt=(now-last)/1000; last=now;
+    t+=dt*speed; if(t>anim.dur) t=0;
+    draw(); raf=requestAnimationFrame(tick);
+  }
+  playBtn.onclick=()=>playing?pause():play();
+  scrub.oninput=()=>{ pause(); focus=null; t=scrub.value/1000*anim.dur; draw(); };
+  $("#plTrophy").onclick=()=>{ pause(); focus=null; t=anim.trophy; draw(); };
+  $("#plContact").onclick=()=>{ pause(); focus=null; t=anim.contact; draw(); };
+  $$("#plSpeed button").forEach(b=>b.onclick=()=>{
+    $$("#plSpeed button").forEach(x=>x.classList.remove("on")); b.classList.add("on"); speed=parseFloat(b.dataset.s);
+  });
+  draw(); play();
+  return { seekTo(tt,f){ pause(); focus=f||null; t=clamp(tt,0,anim.dur); draw(); }, pause, play };
 }
 
 /* ================= VIEW: RESULTS ================= */
-let lastFrames=null, lastResult=null; // keep frames of current analysis in memory for detail/ball
+let lastFrames=null, lastResult=null, lastSession=null; // frames of current analysis in memory for the ball tool
 function ringSVG(score,size=76){
   const r=(size-10)/2, c=2*Math.PI*r, col = score>=80?"var(--good)":score>=60?"var(--warn)":"var(--bad)";
   const off=c*(1-(score||0)/100);
@@ -746,13 +868,15 @@ async function showResults(analysis, result){
   $("#sessTitle").textContent=serves.length+(serves.length>1?" serves":" serve");
   $("#sessSub").innerHTML="Avg score "+badgeFor(avg);
   const session=uid(), now=Date.now();
+  lastSession=session;
   const list=$("#sessServes"); list.innerHTML="";
   const saved=[];
   for(let i=0;i<serves.length;i++){
     const sv=serves[i];
     const thumb=await makeThumb(result, sv.keys.contact);
+    const anim=packAnim(result.frames, sv.keys, result.W, result.H);
     const rec={id:uid(),session,t:now+i,profile:analysis.profileKey,hand:analysis.hand,score:sv.score,
-      metrics:sv.metrics,mscores:sv.mscores,faults:sv.faults,thumb,keys:sv.keys,speed:null,placement:null};
+      metrics:sv.metrics,mscores:sv.mscores,faults:sv.faults,thumb,keys:sv.keys,anim,speed:null,placement:null};
     saved.push(rec);
     S.serves.unshift(rec);
     const it=el("div","sitem");
@@ -783,17 +907,31 @@ function openDetail(rec){
   const prof=PROFILES[rec.profile]||PROFILES.textbook;
   const body=$("#dBody");
   $("#dTitle").innerHTML=`Serve ${badgeFor(rec.score)}`;
-  const detFrames = lastFrames; // may be null if from history
   let html=`<div style="display:flex;gap:14px;align-items:center;margin-bottom:14px">
     <div class="ring">${ringSVG(rec.score)}</div>
     <div style="flex:1"><div class="eyebrow">vs ${prof.name}</div>
     <p class="muted small" style="margin:4px 0 0">${rec.faults.length? rec.faults.length+" thing"+(rec.faults.length>1?"s":"")+" to sharpen":"Clean, well-balanced serve."}</p></div></div>`;
 
-  // keyframe canvas (only if frames in memory)
-  if(detFrames && rec.keys){
-    html+=`<div class="seg mb" id="phaseSeg"><button class="on" data-p="trophy">Trophy</button><button data-p="contact">Contact</button></div>
-      <canvas id="kfCanvas" style="width:100%;height:auto;border-radius:12px;background:#0a1119"></canvas>
-      <div class="legend mb"><b><i style="background:var(--pop)"></i>You</b><b><i style="background:var(--court2)"></i>Ideal ${prof.name}</b></div>`;
+  // replay player (serves analyzed since the replay update carry their own animation)
+  if(rec.anim){
+    const mkT=(rec.anim.trophy/rec.anim.dur*100).toFixed(1), mkC=(rec.anim.contact/rec.anim.dur*100).toFixed(1);
+    html+=`<div class="eyebrow" style="margin:4px 0 8px">Serve replay</div>
+      <canvas id="plCv" style="width:100%;height:auto;border-radius:12px;background:#0a1119;display:block"></canvas>
+      <div class="plbar">
+        <button class="plbtn" id="plPlay">⏸</button>
+        <div class="scrubwrap"><input type="range" id="plScrub" min="0" max="1000" value="0"><i class="mk" style="left:${mkT}%"></i><i class="mk c" style="left:${mkC}%"></i></div>
+        <span class="tiny tnum muted" id="plTime" style="flex:none;width:46px;text-align:right">0.00s</span>
+      </div>
+      <div class="row" style="margin-top:10px;align-items:center">
+        <button class="btn sm" id="plTrophy">🏆 Trophy · ${rec.anim.trophy.toFixed(2)}s</button>
+        <button class="btn sm" id="plContact">💥 Contact · ${rec.anim.contact.toFixed(2)}s</button>
+        <span style="flex:1"></span>
+        <div class="seg" style="flex:none" id="plSpeed"><button data-s="0.25">¼×</button><button class="on" data-s="0.5">½×</button><button data-s="1">1×</button></div>
+      </div>
+      <div class="legend" style="margin-top:8px"><b><i style="background:var(--pop)"></i>You</b><b><i style="background:var(--court2)"></i>Ideal (dashed)</b><b><i style="background:#f5b027"></i>Focus point</b></div>
+      <p class="hint" style="margin:8px 0 14px">Replay loops at half speed. Tap any measurement or fix below to jump it to that exact moment — the orange line marks the joint to adjust.</p>`;
+  }else{
+    html+=`<p class="hint" style="margin:2px 0 14px">🎞 Replays are stored for serves analyzed from now on — this one predates the replay update.</p>`;
   }
   // metrics
   html+=`<div class="card" style="box-shadow:none">`;
@@ -806,7 +944,7 @@ function openDetail(rec){
     const bl=clamp((b[0]-min)/(max-min),0,1)*100, bw=clamp((Math.min(b[1],max)-b[0])/(max-min),0,1)*100;
     const cur=clamp((v-min)/(max-min),0,1)*100;
     const col=sc>=80?"var(--good)":sc>=55?"var(--warn)":"var(--bad)";
-    html+=`<div class="metric"><div class="top"><span class="name">${M.label}</span>
+    html+=`<div class="metric${rec.anim?" tap":""}" data-mkey="${M.key}" data-phase="${M.phase}"><div class="top"><span class="name">${M.label}${rec.anim?' <span style="color:var(--court2);font-size:11px">▶</span>':""}</span>
       <span class="vals"><b style="color:${col}">${metricDisplay(M.key,v)}</b> · target ${M.key==="contactHeight"?b[0].toFixed(2)+"×+":Math.round(b[0])+"–"+Math.round(b[1])+"°"}</span></div>
       <div class="mbar"><span class="band" style="left:${bl}%;width:${bw}%"></span><span class="cur" style="left:${cur}%"></span></div>
       <div class="fx">${M.note}</div></div>`;
@@ -816,7 +954,8 @@ function openDetail(rec){
   if(rec.faults.length){
     html+=`<h3 style="margin:16px 0 10px">Fix these</h3>`;
     for(const f of rec.faults){
-      html+=`<div class="drill"><h4>${f.t}</h4><p>${f.d}</p>`;
+      const tappable=rec.anim&&f.k;
+      html+=`<div class="drill${tappable?" tap":""}" data-k="${f.k||""}" data-phase="${f.phase||"contact"}"><h4>${f.t}${tappable?'<span class="rx">▶ replay</span>':""}</h4><p>${f.d}</p>`;
       for(const dk of f.drills){const d=DRILLS[dk]; if(d) html+=`<p><span class="why">${d.n} (${d.rx}):</span> ${d.how}</p>`;}
       html+=`</div>`;
     }
@@ -827,20 +966,15 @@ function openDetail(rec){
   body.innerHTML=html;
   $("#delBtn").onclick=()=>{ if(confirm("Delete this serve? This can't be undone.")){ deleteServe(rec.id); closeModal("#detailModal"); toast("Serve deleted"); } };
 
-  if(detFrames && rec.keys){
-    const cv=$("#kfCanvas");
-    const r=lastResult; cv.width=r?r.frames? (document.querySelector("#stageVid").videoWidth||720):720:720;
-    // set canvas pixel size to video
-    cv.width = $("#stageVid").videoWidth||720; cv.height=$("#stageVid").videoHeight||1280;
-    const paint=async(phase)=>{
-      const fi = phase==="trophy"?rec.keys.trophy:rec.keys.contact;
-      const f=detFrames[fi]; if(!f) return;
-      await seek($("#stageVid"), f.t);
-      const ctx=cv.getContext("2d"); ctx.drawImage($("#stageVid"),0,0,cv.width,cv.height);
-      ctx.globalAlpha=1; renderKeyframe(cv,f,rec.hand,phase,prof.bands);
+  if(rec.anim){
+    const player=mountPlayer(rec,prof);
+    const jump=(phase,k)=>{
+      if(!player) return;
+      player.seekTo(phase==="trophy"?rec.anim.trophy:rec.anim.contact, k||null);
+      $("#detailModal .sheet").scrollTo({top:0,behavior:"smooth"});
     };
-    paint("trophy");
-    $$("#phaseSeg button").forEach(b=>b.onclick=()=>{$$("#phaseSeg button").forEach(x=>x.classList.remove("on"));b.classList.add("on");paint(b.dataset.p);});
+    $$("#dBody .metric.tap").forEach(m=>m.onclick=()=>jump(m.dataset.phase,m.dataset.mkey));
+    $$("#dBody .drill.tap").forEach(d=>d.onclick=()=>jump(d.dataset.phase,d.dataset.k));
   }
   $("#ballBtn").onclick=()=>openBall(rec);
   openModal("#detailModal");
@@ -849,7 +983,7 @@ function openDetail(rec){
 /* ================= BALL TOOL ================= */
 function openBall(rec){
   const body=$("#ballBody");
-  const hasFrames = lastFrames && rec.keys;
+  const hasFrames = lastFrames && rec.keys && rec.session===lastSession;
   body.innerHTML=`
   ${hasFrames?`<p class="muted small mb">Tap the ball at contact, then scrub to where it lands and tap again. Set a real-world distance once for scale.</p>
    <div class="overlaywrap"><canvas id="ballCv" style="width:100%;height:auto;border-radius:12px;background:#0a1119"></canvas></div>
@@ -1025,7 +1159,7 @@ function renderReco(){
   const wrap=$("#recoDrills");
   const recent=S.serves.slice(0,8);
   const counts={};
-  recent.forEach(s=>(s.faults||[]).forEach(f=>f.drills.forEach(d=>counts[d]=(counts[d]||0)+1)));
+  recent.forEach(s=>(s.faults||[]).forEach(f=>((f&&f.drills)||[]).forEach(d=>counts[d]=(counts[d]||0)+1)));
   const top=Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,3).map(e=>e[0]);
   if(!top.length){ wrap.innerHTML=`<p class="muted small">Analyze a serve and your top fixes show up here.</p>`; return; }
   wrap.innerHTML=top.map(dk=>{const d=DRILLS[dk];return `<div class="drill"><h4>${d.n}<span class="rx">${d.rx}</span></h4><p><span class="why">Why:</span> ${d.why}</p><p>${d.how}</p></div>`;}).join("");
