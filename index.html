@@ -504,44 +504,81 @@ function seek(video,t){
     video.currentTime=t;
   });
 }
-let cancelProc=false;
-async function processVideo(file){
-  cancelProc=false;
-  const lm=await getLandmarker();
+let cancelProc=false, curUrl=null, mpTs=0;
+// align the overlay canvas with the letterboxed video content inside the element
+function fitOverlay(video,ov){
+  const bw=video.clientWidth, bh=video.clientHeight;
+  if(!bw||!bh||!video.videoWidth) return;
+  const va=video.videoWidth/video.videoHeight, ba=bw/bh;
+  let w,h,l,t;
+  if(va>ba){ w=bw; h=bw/va; l=0; t=(bh-h)/2; }
+  else{ h=bh; w=bh*va; t=0; l=(bw-w)/2; }
+  Object.assign(ov.style,{left:l+"px",top:t+"px",width:w+"px",height:h+"px",right:"auto",bottom:"auto"});
+}
+async function loadVideoFile(file){
+  if(curUrl){ URL.revokeObjectURL(curUrl); curUrl=null; }
   const video=$("#stageVid");
-  const ov=$("#stageOv");
-  const url=URL.createObjectURL(file);
-  video.src=url;
+  curUrl=URL.createObjectURL(file);
+  video.src=curUrl;
   await once(video,"loadedmetadata");
   try{ await video.play(); video.pause(); }catch(e){}
   video.currentTime=0;
-  const W=video.videoWidth, H=video.videoHeight;
-  ov.width=W; ov.height=H;
+  fitOverlay(video,$("#stageOv"));
+  return {video, W:video.videoWidth, H:video.videoHeight, dur:video.duration||0};
+}
+function setProc(u,label){
+  $("#procFill").style.width=(clamp(u,0,1)*100).toFixed(0)+"%";
+  $("#procPct").textContent=Math.round(clamp(u,0,1)*100)+"%"+(label?" · "+label:"");
+}
+// run the pose model over [t0,t1] at the given step; mpTs stays monotonic across passes
+async function samplePass(lm,video,W,H,t0,t1,step,onProgress){
+  const ov=$("#stageOv"); ov.width=W; ov.height=H;
+  fitOverlay(video,ov);
   const octx=ov.getContext("2d");
-  const dur=video.duration||0;
-  const targetFps=30;
-  const step=Math.max(1/targetFps, dur/600); // cap ~600 frames
   const frames=[];
-  let ts=0;
-  $("#procStage").textContent="Tracking your body…";
-  for(let t=0;t<dur-1e-3;t+=step){
-    if(cancelProc){ URL.revokeObjectURL(url); return null; }
+  const a=Math.max(0,t0), b=Math.min(video.duration||t1,t1);
+  for(let t=a;t<b-1e-3;t+=step){
+    if(cancelProc) return null;
     await seek(video,t);
-    ts+=Math.round(step*1000)||33;
+    mpTs+=Math.max(1,Math.round(step*1000));
     let res=null;
-    try{ res=lm.detectForVideo(video,ts); }catch(e){}
+    try{ res=lm.detectForVideo(video,mpTs); }catch(e){}
     const p=res&&res.landmarks&&res.landmarks[0]?res.landmarks[0]:null;
     const w=res&&res.worldLandmarks&&res.worldLandmarks[0]?res.worldLandmarks[0]:null;
     frames.push({t,p,w});
-    // live overlay
     octx.clearRect(0,0,W,H);
     if(p) drawSkeleton(octx,p,W,H,"rgba(216,232,56,.9)","rgba(255,255,255,.85)",3);
-    const pct=Math.min(1,t/dur);
-    $("#procFill").style.width=(pct*100).toFixed(0)+"%";
-    $("#procPct").textContent=Math.round(pct*100)+"% · "+frames.length+" frames";
+    if(onProgress) onProgress(clamp((t-a)/Math.max(1e-3,b-a),0,1), frames.length);
   }
-  URL.revokeObjectURL(url);
-  return {frames,W,H,file,dur};
+  return frames;
+}
+// drop frames where the detected person is far smaller than the median subject
+// (a background player on another court) so they can't hijack the analysis
+function filterByScale(frames){
+  const lens=[];
+  for(const f of frames){
+    if(!f.p) continue;
+    const sm=mid(f.p[LM.Lsh],f.p[LM.Rsh]), hm=mid(f.p[LM.Lhip],f.p[LM.Rhip]);
+    f._torso=Math.hypot(sm.x-hm.x,sm.y-hm.y);
+    lens.push(f._torso);
+  }
+  if(lens.length<4) return frames;
+  lens.sort((a,b)=>a-b);
+  const med=lens[Math.floor(lens.length/2)];
+  for(const f of frames){ if(f.p && f._torso<med*0.6){ f.p=null; f.w=null; } }
+  return frames;
+}
+// sharpest contact frame near an expected time (used on the fine re-scan)
+function contactIndexNear(frames,hand,tExpect){
+  const I=idxFor(hand);
+  const hs=smooth(frames.map(f=>f.p?(f.p[I.sh].y-f.p[I.wr].y):null),2);
+  let best=-1,bv=-1e9;
+  for(let i=0;i<frames.length;i++){
+    if(hs[i]==null) continue;
+    if(Math.abs(frames[i].t-tExpect)>0.5) continue;
+    if(hs[i]>bv){bv=hs[i];best=i;}
+  }
+  return {i:best, h:bv};
 }
 
 /* ================= SEGMENTATION + ANALYSIS ================= */
@@ -656,26 +693,22 @@ function scoreMetric(key,v,bands){
   const d = v<lo? lo-v : v-hi;
   return Math.max(0,Math.round(100 - (d/soft)*100));
 }
-function analyzeSession(result,hand,profileKey){
-  const {frames}=result;
-  const serveIdx=detectServes(frames,hand);
+// grade one serve given its own (fine-sampled) frames and contact index
+function gradeServe(frames,ci,hand,profileKey){
   const profile=PROFILES[profileKey];
-  const serves=[];
-  for(const ci of serveIdx){
-    const keys=findKey(frames,ci,hand);
-    const metrics=computeMetrics(frames,keys,hand);
-    if(Object.keys(metrics).length<3) continue;
-    // score
-    let tot=0,wsum=0; const mscores={};
-    for(const M of METRICS){
-      const sc=scoreMetric(M.key,metrics[M.key],profile.bands);
-      if(sc!=null){mscores[M.key]=sc; tot+=sc*M.w; wsum+=M.w;}
-    }
-    const score=wsum? Math.round(tot/wsum):null;
-    const faults=deriveFaults(metrics,profile.bands);
-    serves.push({keys,metrics,mscores,score,faults, tContact:frames[ci].t});
+  const keys=findKey(frames,ci,hand);
+  const metrics=computeMetrics(frames,keys,hand);
+  if(Object.keys(metrics).length<3) return null;
+  // impossible biomechanics = bad pose data or a phantom detection, not a serve
+  if(metrics.kneeBend!=null && metrics.kneeBend>130) return null;
+  let tot=0,wsum=0; const mscores={};
+  for(const M of METRICS){
+    const sc=scoreMetric(M.key,metrics[M.key],profile.bands);
+    if(sc!=null){mscores[M.key]=sc; tot+=sc*M.w; wsum+=M.w;}
   }
-  return {serves,frames,hand,profileKey};
+  const score=wsum? Math.round(tot/wsum):null;
+  const faults=deriveFaults(metrics,profile.bands);
+  return {frames,keys,metrics,mscores,score,faults,tContact:frames[ci].t};
 }
 function deriveFaults(m,bands){
   const F=[];
@@ -705,12 +738,16 @@ function drawSkeleton(ctx,p,W,H,jointCol,boneCol,lw){
 // ideal position of point c so angle(a,b,c)=target, keeping |bc|
 function rot2(cx,cy,x,y,deg){const r=deg*Math.PI/180,c=Math.cos(r),s=Math.sin(r);const dx=x-cx,dy=y-cy;return [cx+dx*c-dy*s, cy+dx*s+dy*c];}
 function idealThird(a,b,c,target){
-  const cur=angle3({x:a.x,y:a.y,z:0},{x:b.x,y:b.y,z:0},{x:c.x,y:c.y,z:0});
-  const need=target-cur;
-  const [x1,y1]=rot2(b.x,b.y,c.x,c.y,need);
-  const [x2,y2]=rot2(b.x,b.y,c.x,c.y,-need);
-  const a1=angle3({x:a.x,y:a.y,z:0},{x:b.x,y:b.y,z:0},{x:x1,y:y1,z:0});
-  return Math.abs(a1-target)<1 ? {x:x1,y:y1} : {x:x2,y:y2};
+  const ang=(x,y)=>angle3({x:a.x,y:a.y,z:0},{x:b.x,y:b.y,z:0},{x,y,z:0});
+  const need=target-ang(c.x,c.y);
+  const cand=[rot2(b.x,b.y,c.x,c.y,need), rot2(b.x,b.y,c.x,c.y,-need)];
+  const ok=cand.filter(([x,y])=>Math.abs(ang(x,y)-target)<2);
+  // of the rotations that hit the target angle, keep the one nearest the user's
+  // actual limb so the ghost never mirrors to the wrong side of the joint
+  const pool=ok.length?ok:cand;
+  let best=pool[0], bd=1e9;
+  for(const q of pool){ const d=Math.hypot(q[0]-c.x,q[1]-c.y); if(d<bd){bd=d;best=q;} }
+  return {x:best[0],y:best[1]};
 }
 /* ================= SERVE REPLAY (stored skeleton animation) ================= */
 // Pack the frames around one serve into a compact, persistable animation:
@@ -718,10 +755,10 @@ function idealThird(a,b,c,target){
 function packAnim(frames,keys,W,H){
   const fT=frames[keys.trophy], fC=frames[keys.contact];
   if(!fT||!fC) return null;
-  const t0=Math.max(0, Math.min(fT.t,fC.t)-0.6), t1=fC.t+0.5;
+  const t0=Math.max(frames[0].t, Math.min(fT.t,fC.t)-1.7), t1=Math.min(frames[frames.length-1].t, fC.t+0.8);
   const sel=frames.filter(f=>f.p && f.t>=t0-1e-4 && f.t<=t1+1e-4);
   if(sel.length<4) return null;
-  const step=Math.max(1, Math.ceil(sel.length/72));
+  const step=Math.max(1, Math.ceil(sel.length/110));
   const fr=[];
   for(let i=0;i<sel.length;i+=step){
     const f=sel[i], k=[];
@@ -746,23 +783,40 @@ function animPoseAt(anim,t){
   const u=clamp((ms-fr[i][0])/((fr[i+1][0]-fr[i][0])||1),0,1);
   return a.map((p,j)=>({x:p.x+(b[j].x-p.x)*u, y:p.y+(b[j].y-p.y)*u, visibility:Math.min(p.visibility,b[j].visibility)}));
 }
-// dashed ideal-form ghost, points already in canvas px
-function drawGhostPx(ctx,p,hand,phase,bands){
+// dashed ideal-form ghost, points already in canvas px.
+// Only drawn for limbs whose measurement is OUTSIDE the target band, as a
+// repositioned limb + arrow from where the joint is to where it should be.
+function drawGhostPx(ctx,p,hand,phase,bands,metrics){
   const I=idxFor(hand);
-  ctx.save(); ctx.setLineDash([6,6]); ctx.lineWidth=3; ctx.strokeStyle="rgba(59,130,196,.9)";
+  const off=k=>{ const v=metrics?metrics[k]:null, b=bands[k]; return v!=null&&b&&(v<b[0]||v>b[1]); };
   const mid2=k=>(bands[k][0]+bands[k][1])/2;
-  const g=(a,b,c,target)=>{
+  ctx.save();
+  const g=(a,b,c,target,label)=>{
     if(!a||!b||!c) return;
     const ci=idealThird(a,b,c,target);
-    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.lineTo(ci.x,ci.y); ctx.stroke();
-    ctx.fillStyle="rgba(59,130,196,.9)";
-    for(const q of [a,b,ci]){ctx.beginPath();ctx.arc(q.x,q.y,4,0,7);ctx.fill();}
+    ctx.strokeStyle="rgba(59,130,196,.95)"; ctx.fillStyle="rgba(59,130,196,.95)"; ctx.lineWidth=3;
+    // the limb where it should be
+    ctx.setLineDash([7,6]);
+    ctx.beginPath(); ctx.moveTo(b.x,b.y); ctx.lineTo(ci.x,ci.y); ctx.stroke();
+    ctx.beginPath(); ctx.arc(ci.x,ci.y,5,0,7); ctx.fill();
+    // arrow: current joint → target position
+    ctx.setLineDash([2,4]); ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(c.x,c.y); ctx.lineTo(ci.x,ci.y); ctx.stroke();
+    ctx.setLineDash([]);
+    const an=Math.atan2(ci.y-c.y,ci.x-c.x);
+    ctx.lineWidth=3;
+    ctx.beginPath();
+    ctx.moveTo(ci.x,ci.y); ctx.lineTo(ci.x-11*Math.cos(an-0.42), ci.y-11*Math.sin(an-0.42));
+    ctx.moveTo(ci.x,ci.y); ctx.lineTo(ci.x-11*Math.cos(an+0.42), ci.y-11*Math.sin(an+0.42));
+    ctx.stroke();
+    ctx.font="700 15px -apple-system,system-ui,sans-serif";
+    ctx.fillText(label, ci.x+9, ci.y-9);
   };
   if(phase==="trophy"){
-    g(p[I.sh],p[I.el],p[I.wr], 180-mid2("elbowTrophy"));
-    g(p[I.hip],p[I.kn],p[I.ank], 180-mid2("kneeBend"));
+    if(off("elbowTrophy")) g(p[I.sh],p[I.el],p[I.wr], 180-mid2("elbowTrophy"), "wrist here");
+    if(off("kneeBend"))    g(p[I.hip],p[I.kn],p[I.ank], 180-mid2("kneeBend"), "ankle here");
   }else{
-    g(p[I.sh],p[I.el],p[I.wr], 180-mid2("elbowContact"));
+    if(off("elbowContact")) g(p[I.sh],p[I.el],p[I.wr], 180-mid2("elbowContact"), "wrist here");
   }
   ctx.restore();
 }
@@ -808,7 +862,7 @@ function mountPlayer(rec,prof){
     const p=animPoseAt(anim,t).map(map);
     const nearT=Math.abs(t-anim.trophy)<=0.07, nearC=Math.abs(t-anim.contact)<=0.07;
     const phase=nearT?"trophy":nearC?"contact":null;
-    if(phase) drawGhostPx(ctx,p,rec.hand,phase,prof.bands);
+    if(phase) drawGhostPx(ctx,p,rec.hand,phase,prof.bands,rec.metrics);
     drawSkeleton(ctx,p,1,1,"rgba(216,232,56,.95)","rgba(243,246,244,.9)",4);
     if(focus) drawFocusPx(ctx,p,rec.hand,focus);
     if(phase){
@@ -851,7 +905,7 @@ function ringSVG(score,size=76){
 function badgeFor(score){ const c=score>=80?"g":score>=60?"w":"b"; const t=score>=80?"Strong":score>=60?"Solid":"Work on it"; return `<span class="badge ${c}">${t}</span>`; }
 
 async function showResults(analysis, result){
-  lastFrames=result.frames; lastResult=analysis;
+  lastFrames=result.frames; lastResult=analysis; // result.frames = coarse whole-clip pass (ball tool scrubbing)
   $("#captureCard").classList.add("hidden");
   $("#procCard").classList.add("hidden");
   const card=$("#resultCard"); card.classList.remove("hidden");
@@ -873,8 +927,8 @@ async function showResults(analysis, result){
   const saved=[];
   for(let i=0;i<serves.length;i++){
     const sv=serves[i];
-    const thumb=await makeThumb(result, sv.keys.contact);
-    const anim=packAnim(result.frames, sv.keys, result.W, result.H);
+    const thumb=await makeThumb(result.W, result.H, sv.frames[sv.keys.contact]);
+    const anim=packAnim(sv.frames, sv.keys, result.W, result.H);
     const rec={id:uid(),session,t:now+i,profile:analysis.profileKey,hand:analysis.hand,score:sv.score,
       metrics:sv.metrics,mscores:sv.mscores,faults:sv.faults,thumb,keys:sv.keys,anim,speed:null,placement:null};
     saved.push(rec);
@@ -890,12 +944,12 @@ async function showResults(analysis, result){
   for(const r of saved) pushServe(r);
   renderServes(); renderProgress(); renderReco();
 }
-async function makeThumb(result, frameIdx){
-  const f=result.frames[frameIdx]; if(!f) return "";
+async function makeThumb(W, H, f){
+  if(!f) return "";
   const video=$("#stageVid");
   await seek(video, f.t);
-  const scale=Math.min(1, 360/result.W);
-  const cw=Math.round(result.W*scale), ch=Math.round(result.H*scale);
+  const scale=Math.min(1, 360/W);
+  const cw=Math.round(W*scale), ch=Math.round(H*scale);
   const cv=document.createElement("canvas"); cv.width=cw; cv.height=ch;
   const cx=cv.getContext("2d"); cx.drawImage(video,0,0,cw,ch);
   if(f.p) drawSkeleton(cx,f.p,cw,ch,"rgba(216,232,56,.95)","rgba(255,255,255,.85)",2);
@@ -928,8 +982,8 @@ function openDetail(rec){
         <span style="flex:1"></span>
         <div class="seg" style="flex:none" id="plSpeed"><button data-s="0.25">¼×</button><button class="on" data-s="0.5">½×</button><button data-s="1">1×</button></div>
       </div>
-      <div class="legend" style="margin-top:8px"><b><i style="background:var(--pop)"></i>You</b><b><i style="background:var(--court2)"></i>Ideal (dashed)</b><b><i style="background:#f5b027"></i>Focus point</b></div>
-      <p class="hint" style="margin:8px 0 14px">Replay loops at half speed. Tap any measurement or fix below to jump it to that exact moment — the orange line marks the joint to adjust.</p>`;
+      <div class="legend" style="margin-top:8px"><b><i style="background:var(--pop)"></i>You</b><b><i style="background:var(--court2)"></i>Target (dashed)</b><b><i style="background:#f5b027"></i>Focus point</b></div>
+      <p class="hint" style="margin:8px 0 14px">Replay loops at half speed. Tap any measurement or fix below to jump to that exact moment — orange marks the joint to adjust, and a dashed blue arrow appears only where a limb is off-target, pointing to where it should be.</p>`;
   }else{
     html+=`<p class="hint" style="margin:2px 0 14px">🎞 Replays are stored for serves analyzed from now on — this one predates the replay update.</p>`;
   }
@@ -1239,15 +1293,53 @@ async function runAnalysis(file){
   $("#procCard").classList.remove("hidden");
   $("#procStage").textContent="Loading AI model…";
   $("#procFill").style.width="4%"; $("#procPct").textContent="First run downloads a ~30MB model — a few seconds…";
+  const bail=()=>{ $("#procCard").classList.add("hidden"); $("#captureCard").classList.remove("hidden"); };
   try{
-    await getLandmarker();
-    const result=await processVideo(file);
-    if(!result){ $("#procCard").classList.add("hidden"); $("#captureCard").classList.remove("hidden"); return; }
-    $("#procStage").textContent="Grading serves…";
-    const hand = S.hand==="auto" ? detectHand(result.frames) : S.hand;
+    const lm=await getLandmarker();
+    cancelProc=false; mpTs=0;
+    const {video,W,H,dur}=await loadVideoFile(file);
+    // pass 1: coarse scan of the whole clip to find the serves
+    $("#procStage").textContent="Tracking your body…";
+    const coarseStep=Math.max(1/30, dur/480);
+    const coarse=await samplePass(lm,video,W,H,0,dur,coarseStep,(u,n)=>setProc(u*0.7, n+" frames"));
+    if(!coarse){ bail(); return; }
+    filterByScale(coarse);
+    const hand = S.hand==="auto" ? detectHand(coarse) : S.hand;
     if(S.hand==="auto") toast("Detected: "+(hand==="left"?"left":"right")+"-handed");
-    const analysis=analyzeSession(result,hand,S.profile);
-    await showResults(analysis,result);
+    const serveIdx=detectServes(coarse,hand);
+    // pass 2: re-scan each serve at full 30fps (toss → follow-through) for
+    // accurate keyframes, metrics and a smooth replay — skipped when pass 1
+    // already ran at 30fps (short clips)
+    const needFine = coarseStep>1/29;
+    const serves=[];
+    for(let k=0;k<serveIdx.length;k++){
+      const tc=coarse[serveIdx[k]].t;
+      let ff;
+      if(needFine){
+        $("#procStage").textContent="Re-scanning serve "+(k+1)+" of "+serveIdx.length+" in detail…";
+        ff=await samplePass(lm,video,W,H,tc-2.2,tc+0.9,1/30,(u)=>setProc(0.7+0.28*((k+u)/serveIdx.length),"serve "+(k+1)+"/"+serveIdx.length));
+        if(!ff){ bail(); return; }
+        filterByScale(ff);
+      }else{
+        ff=coarse.filter(f=>f.t>=tc-2.2 && f.t<=tc+0.9);
+      }
+      const {i:ci,h:peak}=contactIndexNear(ff,hand,tc);
+      if(ci<0) continue;
+      const sv=gradeServe(ff,ci,hand,S.profile);
+      if(sv){ sv._peak=peak; serves.push(sv); }
+    }
+    // a wind-up or toss can register as a second phantom serve moments before the
+    // real one — keep only the highest-reach detection within any 3s span
+    serves.sort((a,b)=>a.tContact-b.tContact);
+    const deduped=[];
+    for(const sv of serves){
+      const prev=deduped[deduped.length-1];
+      if(prev && Math.abs(sv.tContact-prev.tContact)<3){
+        if(sv._peak>prev._peak) deduped[deduped.length-1]=sv;
+      }else deduped.push(sv);
+    }
+    $("#procStage").textContent="Grading serves…"; setProc(1);
+    await showResults({serves:deduped,hand,profileKey:S.profile}, {frames:coarse,W,H,dur});
   }catch(err){
     console.error(err);
     $("#procCard").classList.add("hidden"); $("#captureCard").classList.remove("hidden");
