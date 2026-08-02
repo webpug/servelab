@@ -182,10 +182,15 @@ a.link{color:var(--court2);text-decoration:none;font-weight:700}
 /* replay player */
 .plbar{display:flex;gap:10px;align-items:center;margin-top:12px}
 .plbtn{width:44px;height:44px;flex:none;border-radius:12px;background:var(--panel2);border:1px solid var(--line);font-size:16px;display:grid;place-items:center}
+.plbtn.dim{opacity:.4}
 .scrubwrap{position:relative;flex:1;display:flex;align-items:center;height:26px}
 .scrubwrap input{width:100%;margin:0;accent-color:var(--court2)}
 .scrubwrap .mk{position:absolute;top:50%;transform:translate(-50%,-50%);width:9px;height:9px;border-radius:50%;background:var(--court2);border:2px solid var(--bg);pointer-events:none}
 .scrubwrap .mk.c{background:var(--pop)}
+.plstage{position:relative;overflow:hidden;border-radius:12px;background:#0a1119;width:100%;margin:0 auto}
+.plstage video,.plstage canvas{display:block}
+.plstage canvas{pointer-events:none}
+.plphase{position:absolute;left:10px;top:10px;font:800 13px/1 -apple-system,system-ui,sans-serif;letter-spacing:.07em;padding:5px 10px;border-radius:8px;background:rgba(10,17,25,.6);pointer-events:none;opacity:0;transition:opacity .15s}
 .metric.tap,.drill.tap{cursor:pointer}
 .metric.tap:active,.drill.tap:active{opacity:.65}
 </style>
@@ -409,25 +414,72 @@ const PHASES=[
   ["Deceleration / finish","Arm pronates across, land balanced on the front foot inside the court, back leg swings through."]
 ];
 
-/* ================= STATE / STORE ================= */
-const store={
-  get k(){return "servelab_v2";},
-  load(){ try{return JSON.parse(localStorage.getItem(this.k))||{serves:[],profile:"textbook",hand:"auto"};}catch(e){return {serves:[],profile:"textbook",hand:"auto"};} },
-  save(s){ localStorage.setItem(this.k, JSON.stringify(s)); }
-};
-let S = store.load();
-function persist(){
-  try{ store.save(S); }
+/* ================= STATE / STORE =================
+   State lives in IndexedDB ("kv" store) — localStorage's ~5MB cap silently
+   dropped sessions once thumbs+replays piled up. Replay video clips (blobs)
+   live in the "clips" store, keyed by serve id. localStorage is kept only as
+   a legacy migration source and a fallback for browsers without IndexedDB. */
+const LS_KEY="servelab_v2";
+let idb=null;
+function idbOpen(){
+  return new Promise((res,rej)=>{
+    if(!("indexedDB" in window)) return rej(new Error("no idb"));
+    const q=indexedDB.open("servelab",1);
+    q.onupgradeneeded=()=>{ const d=q.result;
+      if(!d.objectStoreNames.contains("kv")) d.createObjectStore("kv");
+      if(!d.objectStoreNames.contains("clips")) d.createObjectStore("clips"); };
+    q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error); q.onblocked=()=>rej(new Error("blocked"));
+  });
+}
+function idbTx(st,mode,fn){
+  return new Promise((res,rej)=>{
+    const tx=idb.transaction(st,mode), r=fn(tx.objectStore(st));
+    tx.oncomplete=()=>res(r&&("result" in r)?r.result:undefined);
+    tx.onerror=()=>rej(tx.error); tx.onabort=()=>rej(tx.error);
+  });
+}
+const idbGet=(st,k)=>idbTx(st,"readonly",s=>s.get(k));
+const idbPut=(st,k,v)=>idbTx(st,"readwrite",s=>s.put(v,k));
+const idbDel=(st,k)=>idbTx(st,"readwrite",s=>s.delete(k));
+
+let S={serves:[],profile:"textbook",hand:"auto"};
+async function loadState(){
+  try{ idb=await idbOpen(); }catch(e){ idb=null; }
+  let st=null;
+  if(idb){ try{ st=await idbGet("kv","state"); }catch(e){} }
+  if(!st){
+    try{ st=JSON.parse(localStorage.getItem(LS_KEY)); }catch(e){}
+    if(st && idb){ // one-time migration; free the quota that was eating sessions
+      try{ await idbPut("kv","state",st); localStorage.removeItem(LS_KEY); }catch(e){}
+    }
+  }
+  if(st) S=st;
+  try{ navigator.storage&&navigator.storage.persist&&navigator.storage.persist(); }catch(e){}
+}
+function lsSave(){
+  try{ localStorage.setItem(LS_KEY, JSON.stringify(S)); }
   catch(e){
     // storage full — shed replay animations from the oldest serves first, then retry
     const oldestFirst=[...S.serves].sort((a,b)=>a.t-b.t);
     for(const s of oldestFirst){
       if(!s.anim) continue;
       delete s.anim;
-      try{ store.save(S); return; }catch(_){}
+      try{ localStorage.setItem(LS_KEY, JSON.stringify(S)); return; }catch(_){}
     }
-    try{ store.save(S); }catch(_){ console.warn("persist failed",e); }
+    console.warn("persist failed",e);
   }
+}
+function persist(){
+  if(idb) idbPut("kv","state",S).catch(e=>{ console.warn("idb persist failed",e); lsSave(); });
+  else lsSave();
+}
+// keep at most the 60 newest replay videos on disk
+async function pruneClips(){
+  if(!idb) return;
+  const withClips=S.serves.filter(s=>s.hasClip).sort((a,b)=>b.t-a.t);
+  const drop=withClips.slice(60);
+  for(const s of drop){ s.hasClip=false; try{ await idbDel("clips",s.id); }catch(e){} }
+  if(drop.length) persist();
 }
 
 /* ================= SUPABASE (optional cloud sync) ================= */
@@ -766,7 +818,45 @@ function packAnim(frames,keys,W,H){
     fr.push([Math.round((f.t-t0)*1000), k]);
   }
   if(fr.length<2) return null;
-  return {v:1, W, H, trophy:+(fT.t-t0).toFixed(3), contact:+(fC.t-t0).toFixed(3), dur:fr[fr.length-1][0]/1000, fr};
+  return {v:1, W, H, t0:+t0.toFixed(3), trophy:+(fT.t-t0).toFixed(3), contact:+(fC.t-t0).toFixed(3), dur:fr[fr.length-1][0]/1000, fr};
+}
+// Record the real video for one serve window into a small blob (≤720px wide,
+// realtime canvas capture). Clip time 0 lines up with anim time 0.
+async function recordClip(video,t0,t1){
+  if(!("MediaRecorder" in window) || !HTMLCanvasElement.prototype.captureStream) return null;
+  const W=video.videoWidth, H=video.videoHeight;
+  if(!W||!H) return null;
+  const scale=Math.min(1,720/W);
+  const cw=Math.round(W*scale/2)*2, ch=Math.round(H*scale/2)*2;
+  const cv=document.createElement("canvas"); cv.width=cw; cv.height=ch;
+  const cx=cv.getContext("2d");
+  const mime=["video/mp4;codecs=avc1.42E01E","video/mp4","video/webm;codecs=vp9","video/webm;codecs=vp8","video/webm"]
+    .find(m=>{ try{return MediaRecorder.isTypeSupported(m);}catch(e){return false;} })||"";
+  let rec;
+  try{ rec=new MediaRecorder(cv.captureStream(30), mime?{mimeType:mime,videoBitsPerSecond:3000000}:{videoBitsPerSecond:3000000}); }
+  catch(e){ return null; }
+  const chunks=[];
+  rec.ondataavailable=e=>{ if(e.data&&e.data.size) chunks.push(e.data); };
+  const stopped=new Promise(r=>rec.onstop=r);
+  await seek(video,t0);
+  cx.drawImage(video,0,0,cw,ch);
+  video.muted=true; video.playbackRate=1;
+  rec.start(250);
+  try{ await video.play(); }catch(e){}
+  const deadline=performance.now()+(t1-t0)*1000+5000;
+  await new Promise(res=>{
+    const step=()=>{
+      cx.drawImage(video,0,0,cw,ch);
+      if(video.currentTime>=t1-0.03 || video.ended || performance.now()>deadline) res();
+      else requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
+  video.pause();
+  try{ rec.stop(); }catch(e){}
+  await stopped;
+  if(!chunks.length) return null;
+  return new Blob(chunks,{type:mime||"video/webm"});
 }
 function animPose(anim,i){
   const k=anim.fr[i][1], out=[];
@@ -836,32 +926,96 @@ function drawFocusPx(ctx,p,hand,key){
   for(const q of pts){ctx.beginPath();ctx.arc(q.x,q.y,6,0,7);ctx.fill();}
   ctx.restore();
 }
-function mountPlayer(rec,prof){
-  const anim=rec.anim, cv=$("#plCv");
-  if(!anim||!cv) return null;
-  // bounding box of the whole motion (px space) so the figure fills the canvas
-  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+// normalised bounding box of the whole motion, with breathing room
+function animBBox(anim){
+  let x0=1,y0=1,x1=0,y1=0;
   for(const [,k] of anim.fr) for(let j=0;j<k.length;j+=3){
     if(k[j+2]<40) continue;
-    const x=k[j]/1000*anim.W, y=k[j+1]/1000*anim.H;
+    const x=k[j]/1000, y=k[j+1]/1000;
     if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y;
   }
-  if(x0>x1){x0=0;y0=0;x1=anim.W;y1=anim.H;}
-  const mx=(x1-x0)*.2+14, my=(y1-y0)*.12+14;
-  x0-=mx; x1+=mx; y0-=my; y1+=my;
+  if(x0>=x1){x0=0;y0=0;x1=1;y1=1;}
+  const mx=(x1-x0)*.2+14/anim.W, my=(y1-y0)*.12+14/anim.H;
+  return {x0:clamp(x0-mx,0,1), x1:clamp(x1+mx,0,1), y0:clamp(y0-my,0,1), y1:clamp(y1+my,0,1)};
+}
+let curClipUrl=null;
+function mountPlayer(rec,prof,clipBlob){
+  const anim=rec.anim, host=$("#plHost");
+  if(!anim||!host) return null;
+  const scrub=$("#plScrub"), timeEl=$("#plTime"), playBtn=$("#plPlay");
+  const bb=animBBox(anim);
+  let focus=null;
+
+  /* ---- real-video mode: the recorded clip, cropped to the serve, skeleton overlaid ---- */
+  if(clipBlob){
+    if(curClipUrl) URL.revokeObjectURL(curClipUrl);
+    curClipUrl=URL.createObjectURL(clipBlob);
+    // crop the view to the motion bbox: video+overlay share one geometry inside the stage
+    const z=Math.min(1/(bb.x1-bb.x0), 3);
+    const bwN=1/z, cxN=(bb.x0+bb.x1)/2;
+    const bx0=clamp(cxN-bwN/2, 0, 1-bwN);
+    const byH=Math.max(bb.y1-bb.y0, 1e-3);
+    host.innerHTML=`<div class="plstage" id="plStage">
+      <video id="plVid" playsinline muted loop preload="auto"></video>
+      <canvas id="plCv"></canvas><span class="plphase" id="plPhase"></span></div>`;
+    const stage=$("#plStage"), vid=$("#plVid"), cv=$("#plCv"), phaseEl=$("#plPhase");
+    stage.style.aspectRatio=(bwN*anim.W)+" / "+(byH*anim.H);
+    const geom=`position:absolute;width:${(z*100).toFixed(2)}%;height:auto;left:${(-bx0*z*100).toFixed(2)}%;top:${(-bb.y0/byH*100).toFixed(2)}%`;
+    vid.style.cssText=geom; cv.style.cssText=geom;
+    const OW=720, OH=Math.round(OW*anim.H/anim.W);
+    cv.width=OW; cv.height=OH;
+    const ctx=cv.getContext("2d");
+    let bones=true, raf=0;
+    vid.src=curClipUrl;
+    vid.playbackRate=0.5;
+    function draw(){
+      const t=clamp(vid.currentTime,0,anim.dur);
+      ctx.clearRect(0,0,OW,OH);
+      const p=animPoseAt(anim,t).map(q=>({x:q.x*OW,y:q.y*OH,visibility:q.visibility}));
+      const phase=Math.abs(t-anim.trophy)<=0.07?"trophy":Math.abs(t-anim.contact)<=0.07?"contact":null;
+      if(phase) drawGhostPx(ctx,p,rec.hand,phase,prof.bands,rec.metrics);
+      if(bones) drawSkeleton(ctx,p,1,1,"rgba(216,232,56,.9)","rgba(243,246,244,.75)",3);
+      if(focus) drawFocusPx(ctx,p,rec.hand,focus);
+      phaseEl.style.opacity=phase?"1":"0";
+      if(phase){ phaseEl.textContent=phase==="trophy"?"TROPHY":"CONTACT"; phaseEl.style.color=phase==="trophy"?"#7db8e8":"#d8e838"; }
+      playBtn.textContent=vid.paused?"▶":"⏸";
+      scrub.value=String(Math.round(t/anim.dur*1000));
+      timeEl.textContent=t.toFixed(2)+"s";
+    }
+    function loop(){
+      if(!$("#detailModal").classList.contains("open")){ vid.pause(); return; }
+      draw(); raf=requestAnimationFrame(loop);
+    }
+    playBtn.onclick=()=>{ vid.paused?vid.play():vid.pause(); };
+    scrub.oninput=()=>{ vid.pause(); focus=null; vid.currentTime=scrub.value/1000*anim.dur; };
+    $("#plTrophy").onclick=()=>{ vid.pause(); focus=null; vid.currentTime=anim.trophy; };
+    $("#plContact").onclick=()=>{ vid.pause(); focus=null; vid.currentTime=anim.contact; };
+    $$("#plSpeed button").forEach(b=>b.onclick=()=>{
+      $$("#plSpeed button").forEach(x=>x.classList.remove("on")); b.classList.add("on"); vid.playbackRate=parseFloat(b.dataset.s);
+    });
+    const bonesBtn=$("#plBones");
+    if(bonesBtn){ bonesBtn.style.display=""; bonesBtn.onclick=()=>{ bones=!bones; bonesBtn.classList.toggle("dim",!bones); }; }
+    vid.play().catch(()=>{});
+    loop();
+    return { seekTo(tt,f){ vid.pause(); focus=f||null; vid.currentTime=clamp(tt,0,anim.dur); }, pause:()=>vid.pause(), play:()=>vid.play() };
+  }
+
+  /* ---- skeleton-only mode (serves without a stored video clip) ---- */
+  host.innerHTML=`<canvas id="plCv" style="width:100%;height:auto;border-radius:12px;background:#0a1119;display:block"></canvas>`;
+  const cv=$("#plCv");
+  const x0=bb.x0*anim.W, x1=bb.x1*anim.W, y0=bb.y0*anim.H, y1=bb.y1*anim.H;
   const bw=x1-x0, bh=y1-y0;
   const CW=720, CH=Math.round(clamp(CW*bh/bw,380,960));
   cv.width=CW; cv.height=CH;
   const sc=Math.min(CW/bw,CH/bh), oxp=(CW-bw*sc)/2, oyp=(CH-bh*sc)/2;
   const map=q=>({x:(q.x*anim.W-x0)*sc+oxp, y:(q.y*anim.H-y0)*sc+oyp, visibility:q.visibility});
   const ctx=cv.getContext("2d");
-  const scrub=$("#plScrub"), timeEl=$("#plTime"), playBtn=$("#plPlay");
-  let t=0, playing=false, raf=0, last=0, focus=null, speed=0.5;
+  const bonesBtn=$("#plBones"); if(bonesBtn) bonesBtn.style.display="none";
+  let t=0, playing=false, raf=0, last=0, speed=0.5;
   function draw(){
     ctx.clearRect(0,0,CW,CH);
     const p=animPoseAt(anim,t).map(map);
-    const nearT=Math.abs(t-anim.trophy)<=0.07, nearC=Math.abs(t-anim.contact)<=0.07;
-    const phase=nearT?"trophy":nearC?"contact":null;
+    const phase=Math.abs(t-anim.trophy)<=0.07?"trophy":Math.abs(t-anim.contact)<=0.07?"contact":null;
     if(phase) drawGhostPx(ctx,p,rec.hand,phase,prof.bands,rec.metrics);
     drawSkeleton(ctx,p,1,1,"rgba(216,232,56,.95)","rgba(243,246,244,.9)",4);
     if(focus) drawFocusPx(ctx,p,rec.hand,focus);
@@ -906,41 +1060,56 @@ function badgeFor(score){ const c=score>=80?"g":score>=60?"w":"b"; const t=score
 
 async function showResults(analysis, result){
   lastFrames=result.frames; lastResult=analysis; // result.frames = coarse whole-clip pass (ball tool scrubbing)
-  $("#captureCard").classList.add("hidden");
-  $("#procCard").classList.add("hidden");
-  const card=$("#resultCard"); card.classList.remove("hidden");
+  const card=$("#resultCard");
   const serves=analysis.serves;
   if(!serves.length){
+    $("#captureCard").classList.add("hidden");
+    $("#procCard").classList.add("hidden");
+    card.classList.remove("hidden");
     $("#sessRing").innerHTML=ringSVG(null);
     $("#sessTitle").textContent="No serves detected";
     $("#sessSub").textContent="Make sure your whole body is in frame, filmed from the side. Try again with a clearer angle.";
     $("#sessServes").innerHTML="";
     return;
   }
-  const avg=Math.round(serves.reduce((s,x)=>s+(x.score||0),0)/serves.length);
-  $("#sessRing").innerHTML=ringSVG(avg);
-  $("#sessTitle").textContent=serves.length+(serves.length>1?" serves":" serve");
-  $("#sessSub").innerHTML="Avg score "+badgeFor(avg);
   const session=uid(), now=Date.now();
   lastSession=session;
-  const list=$("#sessServes"); list.innerHTML="";
   const saved=[];
+  {const ov=$("#stageOv"); ov.getContext("2d").clearRect(0,0,ov.width,ov.height);}
+  // build records (thumbs + replay videos) while the source video is still loaded
   for(let i=0;i<serves.length;i++){
     const sv=serves[i];
     const thumb=await makeThumb(result.W, result.H, sv.frames[sv.keys.contact]);
     const anim=packAnim(sv.frames, sv.keys, result.W, result.H);
     const rec={id:uid(),session,t:now+i,profile:analysis.profileKey,hand:analysis.hand,score:sv.score,
       metrics:sv.metrics,mscores:sv.mscores,faults:sv.faults,thumb,keys:sv.keys,anim,speed:null,placement:null};
+    if(anim && anim.t0!=null && idb){
+      try{
+        $("#procStage").textContent="Saving replay video "+(i+1)+" of "+serves.length+"…";
+        const blob=await recordClip($("#stageVid"), anim.t0, anim.t0+anim.dur);
+        if(blob){ await idbPut("clips",rec.id,blob); rec.hasClip=true; }
+      }catch(e){ console.warn("clip save failed",e); }
+    }
     saved.push(rec);
     S.serves.unshift(rec);
+  }
+  $("#captureCard").classList.add("hidden");
+  $("#procCard").classList.add("hidden");
+  card.classList.remove("hidden");
+  const avg=Math.round(serves.reduce((s,x)=>s+(x.score||0),0)/serves.length);
+  $("#sessRing").innerHTML=ringSVG(avg);
+  $("#sessTitle").textContent=serves.length+(serves.length>1?" serves":" serve");
+  $("#sessSub").innerHTML="Avg score "+badgeFor(avg);
+  const list=$("#sessServes"); list.innerHTML="";
+  saved.forEach((rec,i)=>{
     const it=el("div","sitem");
-    it.innerHTML=`<img class="th" src="${thumb}"><div class="meta"><h4>Serve ${i+1} ${badgeFor(sv.score)}</h4>
-      <p class="muted tiny" style="margin:3px 0 0">${sv.faults.length?sv.faults[0].t:"Clean fundamentals"}</p></div>
-      <div class="ring" style="width:52px;height:52px">${ringSVG(sv.score,52)}</div>`;
+    it.innerHTML=`<img class="th" src="${rec.thumb}"><div class="meta"><h4>Serve ${i+1} ${badgeFor(rec.score)}</h4>
+      <p class="muted tiny" style="margin:3px 0 0">${rec.faults.length?rec.faults[0].t:"Clean fundamentals"}</p></div>
+      <div class="ring" style="width:52px;height:52px">${ringSVG(rec.score,52)}</div>`;
     it.onclick=()=>openDetail(rec);
     list.appendChild(it);
-  }
-  persist();
+  });
+  persist(); pruneClips();
   for(const r of saved) pushServe(r);
   renderServes(); renderProgress(); renderReco();
 }
@@ -966,15 +1135,17 @@ function openDetail(rec){
     <div style="flex:1"><div class="eyebrow">vs ${prof.name}</div>
     <p class="muted small" style="margin:4px 0 0">${rec.faults.length? rec.faults.length+" thing"+(rec.faults.length>1?"s":"")+" to sharpen":"Clean, well-balanced serve."}</p></div></div>`;
 
-  // replay player (serves analyzed since the replay update carry their own animation)
+  // replay player (serves analyzed since the replay update carry their own animation;
+  // newer ones also carry the real video clip in IndexedDB)
   if(rec.anim){
     const mkT=(rec.anim.trophy/rec.anim.dur*100).toFixed(1), mkC=(rec.anim.contact/rec.anim.dur*100).toFixed(1);
     html+=`<div class="eyebrow" style="margin:4px 0 8px">Serve replay</div>
-      <canvas id="plCv" style="width:100%;height:auto;border-radius:12px;background:#0a1119;display:block"></canvas>
+      <div id="plHost"></div>
       <div class="plbar">
         <button class="plbtn" id="plPlay">⏸</button>
         <div class="scrubwrap"><input type="range" id="plScrub" min="0" max="1000" value="0"><i class="mk" style="left:${mkT}%"></i><i class="mk c" style="left:${mkC}%"></i></div>
         <span class="tiny tnum muted" id="plTime" style="flex:none;width:46px;text-align:right">0.00s</span>
+        <button class="plbtn" id="plBones" title="Toggle skeleton" style="display:none">🦴</button>
       </div>
       <div class="row" style="margin-top:10px;align-items:center">
         <button class="btn sm" id="plTrophy">🏆 Trophy · ${rec.anim.trophy.toFixed(2)}s</button>
@@ -983,7 +1154,7 @@ function openDetail(rec){
         <div class="seg" style="flex:none" id="plSpeed"><button data-s="0.25">¼×</button><button class="on" data-s="0.5">½×</button><button data-s="1">1×</button></div>
       </div>
       <div class="legend" style="margin-top:8px"><b><i style="background:var(--pop)"></i>You</b><b><i style="background:var(--court2)"></i>Target (dashed)</b><b><i style="background:#f5b027"></i>Focus point</b></div>
-      <p class="hint" style="margin:8px 0 14px">Replay loops at half speed. Tap any measurement or fix below to jump to that exact moment — orange marks the joint to adjust, and a dashed blue arrow appears only where a limb is off-target, pointing to where it should be.</p>`;
+      <p class="hint" style="margin:8px 0 14px">Replay loops at half speed${rec.hasClip?" — your real footage with the skeleton overlaid (🦴 hides it)":""}. Tap any measurement or fix below to jump to that exact moment — orange marks the joint to adjust, and a dashed blue arrow appears only where a limb is off-target, pointing to where it should be.</p>`;
   }else{
     html+=`<p class="hint" style="margin:2px 0 14px">🎞 Replays are stored for serves analyzed from now on — this one predates the replay update.</p>`;
   }
@@ -1021,7 +1192,7 @@ function openDetail(rec){
   $("#delBtn").onclick=()=>{ if(confirm("Delete this serve? This can't be undone.")){ deleteServe(rec.id); closeModal("#detailModal"); toast("Serve deleted"); } };
 
   if(rec.anim){
-    const player=mountPlayer(rec,prof);
+    let player=null;
     const jump=(phase,k)=>{
       if(!player) return;
       player.seekTo(phase==="trophy"?rec.anim.trophy:rec.anim.contact, k||null);
@@ -1029,6 +1200,11 @@ function openDetail(rec){
     };
     $$("#dBody .metric.tap").forEach(m=>m.onclick=()=>jump(m.dataset.phase,m.dataset.mkey));
     $$("#dBody .drill.tap").forEach(d=>d.onclick=()=>jump(d.dataset.phase,d.dataset.k));
+    (async()=>{
+      let blob=null;
+      if(rec.hasClip && idb){ try{ blob=await idbGet("clips",rec.id); }catch(e){} }
+      player=mountPlayer(rec,prof,blob||null);
+    })();
   }
   $("#ballBtn").onclick=()=>openBall(rec);
   openModal("#detailModal");
@@ -1349,6 +1525,7 @@ async function runAnalysis(file){
 
 function deleteServe(id){
   const i=S.serves.findIndex(s=>s.id===id); if(i>=0)S.serves.splice(i,1);
+  if(idb) idbDel("clips",id).catch(()=>{});
   persist(); renderServes(); renderProgress(); renderReco();
   if(sb&&user){ try{ sb.from("serves").delete().eq("id",id); sb.storage.from("thumbs").remove([user.id+"/"+id+".jpg"]); }catch(e){} }
 }
@@ -1358,10 +1535,13 @@ function renderHand(){
 }
 
 /* ================= BOOT ================= */
-renderServes(); renderProgress(); renderCoach(); renderHand();
-initSB();
-// warm the model in the background so first analysis is fast
-setTimeout(()=>getLandmarker().catch(()=>{}),1500);
+(async()=>{
+  await loadState();
+  renderServes(); renderProgress(); renderCoach(); renderHand();
+  initSB();
+  // warm the model in the background so first analysis is fast
+  setTimeout(()=>getLandmarker().catch(()=>{}),1500);
+})();
 </script>
 </body>
 </html>
